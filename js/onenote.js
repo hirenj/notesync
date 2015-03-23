@@ -7,6 +7,7 @@ var worker_function = function(self) {
 				element_paths[document_id] = [];
 				extracted[document_id] = {};
 			}
+			console.log(document_id);
 			return document_id;
 		},
 		'watch_element' : function(document_id,element_id) {
@@ -56,21 +57,31 @@ var worker_function = function(self) {
 	}
 
 	self.addEventListener('message', function(e) {
-		postMessage( { 'method' : e.data.method, 'id' : e.data.id , 'message_id' : e.data.message_id, 'value' : methods[e.data.method].apply(null,e.data.arguments) }  );
+		if (e.data) {
+			postMessage( { 'method' : e.data.method, 'id' : e.data.id , 'message_id' : e.data.message_id, 'value' : methods[e.data.method].apply(null,e.data.arguments) }  );
+		}
 	}, false);
+
+	WL.init({
+	    client_id: APP_CLIENT_ID,
+	    redirect_uri: REDIRECT_URL,
+	    scope: "wl.signin", 
+	    response_type: "token"
+	});
 
 };
 
 if ("Worker" in window) {
 	window.OneNoteSync = (function() {
-
-		var common_worker = new Worker('var worker = '+worker_function.toString()+"; worker(this);");
+		var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
 		common_worker.postMessage();
 
 		var OneNoteSync = function() {
 		};
 
-		// OneNoteSync.prototype.containerid;
+		OneNoteSync.prototype.addDocument = function(doc) {
+			common_worker.postMessage({'method' : 'add_document', 'id' : '', 'message_id' : '', 'arguments' : [ doc ]});
+		};
 		return OneNoteSync;
 	})();
 }
