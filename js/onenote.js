@@ -1,5 +1,6 @@
-
 var worker_function = function(self) {
+
+	const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
 
 	var methods = {
 		'add_document' : function(document_id) {
@@ -39,7 +40,13 @@ var worker_function = function(self) {
 			this.token = token;
 			// Make sure we can fire events to obtain new
 			// oauth tokens when the current one expires
+			return "All ok";
 		},
+		'list_notebooks' : function() {
+			return do_api_call(list_notebooks_url,this.token).then(function(json) {
+				return json.data;
+			});
+		}
 	};
 
 	// What we use to extract out the elements
@@ -54,20 +61,29 @@ var worker_function = function(self) {
 		// Extract element
 		// Check changed
 		postMessage({ 'method' : 'elementChanged' });
-	}
+	};
+
+	var do_api_call = function(url,token,xml) {
+		return new Promise(function(resolve,reject) {
+			var xhr = new XMLHttpRequest();
+			xhr.addEventListener("load", function(ev) {
+				resolve(xml ? ev.srcElement.responseXML : JSON.parse(ev.srcElement.responseText));
+			}, false);
+			xhr.addEventListener("error", reject, false);
+			xhr.addEventListener("abort", reject, false);
+			xhr.open('GET',url);
+			xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+			xhr.send();
+		});
+	};
 
 	self.addEventListener('message', function(e) {
 		if (e.data) {
-			postMessage( { 'method' : e.data.method, 'id' : e.data.id , 'message_id' : e.data.message_id, 'value' : methods[e.data.method].apply(null,e.data.arguments) }  );
+			Promise.resolve(methods[e.data.method].apply(null,e.data.arguments)).then(function(val) {
+				postMessage( { 'method' : e.data.method, 'message_id' : e.data.message_id, 'value' : val }  );
+			});
 		}
 	}, false);
-
-	WL.init({
-	    client_id: APP_CLIENT_ID,
-	    redirect_uri: REDIRECT_URL,
-	    scope: "wl.signin", 
-	    response_type: "token"
-	});
 
 };
 
@@ -76,11 +92,60 @@ if ("Worker" in window) {
 		var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
 		common_worker.postMessage();
 
+		WL.init({
+		    client_id: '000000004C14DD4A',
+		    redirect_uri: 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html',
+		    scope: "office.onenote_update",
+		    response_type: "token"
+		}).then(function() {
+			console.log("Inited OneNote library");
+		},function(err) {
+			console.log(err);
+		});
+
+		var worker_method = function(method,args) {
+			return new Promise(function(resolve,reject) {
+				var message_block = { 'method' : method,
+									  'arguments' : args,
+									  'message_id' : (new Date()).getTime()
+									};
+
+				var receive_func = function(e) {
+					if (e.data) {
+						if (e.data.message_id == message_block.message_id) {
+							resolve(e.data.value);
+						}
+						// We should handle the error cases in here too.
+					}
+				};
+
+				common_worker.addEventListener('message',receive_func);
+
+				common_worker.postMessage(message_block);
+
+				setTimeout(function() {
+					common_worker.removeEventListener('message',receive_func);
+					reject({"error" : "Timeout"});
+				},10000);
+			});
+		}
+
 		var OneNoteSync = function() {
+			WL.login().then(function(response) {
+				worker_method('set_oauth_token', [ response.session.access_token ] ).then(function(ok) {
+					console.log(ok);
+				});
+			},function(err) {
+				console.log(err);
+			});
+		};
+
+		OneNoteSync.prototype.listNotebooks = function() {
+			return worker_method('list_notebooks');
 		};
 
 		OneNoteSync.prototype.addDocument = function(doc) {
-			common_worker.postMessage({'method' : 'add_document', 'id' : '', 'message_id' : '', 'arguments' : [ doc ]});
+			return worker_method('add_document', [ doc ]);
 		};
 		return OneNoteSync;
 	})();
