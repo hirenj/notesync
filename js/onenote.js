@@ -1,5 +1,5 @@
 var worker_function = function(self) {
-    console.log("Instantiating worker");
+
     const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime&filter=lastModifiedTime gt 2015-01-01T13:19:47.043Z";
@@ -101,11 +101,14 @@ var worker_function = function(self) {
         'set_values' : function(document_id,element_id,values) {
             // Set the values back into the element that
             // we pulled data out of.
-            // But actually store the values in localstorage
-            // so that they can survive browser shutdown
-            // or something, and eventually synchronise back
-            // up. Maybe giving a message if the server version
-            // of the data is out of sync with the local version.
+            return resolve_lastest_data({ 'page_id' : document_id,
+                                          'element_id' : element_id,
+                                          'source' : 'local',
+                                          'modified' : new Date() ,
+                                          'value' : values
+                                      }).then(function() {
+                                        extracted[document_id][element_id] = values;
+                                      });
         },
         'set_oauth_token' : function(token) {
             this.token = token;
@@ -127,7 +130,27 @@ var worker_function = function(self) {
     // What we use to extract out the elements
     var element_paths = {}; //{ 'document_id' : [ '#element_identifier' ] };
 
-    var extracted = {};
+    var extracted = { 1 : { 2 : null } };
+
+    var database_watcher = function() {
+        var ids_to_watch = [];
+        Object.keys(extracted).forEach(function(page_id) {
+            ids_to_watch = ids_to_watch.concat(Object.keys(extracted[page_id]).map(function(el_id) {  return [page_id,el_id]; }));
+        });
+
+        Promise.all( ids_to_watch.map( function(ids) { return get_latest_data(ids[0],ids[1]); } ) ).then(
+        function(vals) {
+            vals.forEach(function(val) {
+                if (extracted[val.page_id][val.element_id] != val.value) {
+                    console.log("Changed value for ",val.page_id,val.element_id,"from",extracted[val.page_id][val.element_id],val.value);
+                    extracted[val.page_id][val.element_id] = val.value;
+                    postMessage({"event" : "change", "element_id" : val.element_id, "page_id" : val.page_id, "value" : val.value });
+                }
+            });
+        });
+    };
+
+    setInterval(database_watcher,1000);
 
     //var doc_watcher_timeout = setTimeout(synchronise_documents,5*60*1000);
 
@@ -168,23 +191,16 @@ var worker_function = function(self) {
                 // Store all this data in local storage along with the date that the
                 // page was last modified
 
-                // Work out the sync precedence of this according to the
-                // * Data stored on localStorage
-                // * Changes pending sync
-                // * Whatever is on the server
-
                 // Need to handle deleted pages on the server too
             });
         });
 
         // Check changed
 
-        // Notify user of any conflicts
-        // Probably pause the syncing while we sort out any conflicts
-
         // Post changes that need to be synced in one block of operations
+        // After doing/verifying the upload on a local, add a remote entry in with a guessed modified time
 
-//      postMessage({ 'method' : 'elementChanged' });
+        // Make sure we fire off a db check immediately after the sync process? (database_watcher method)
     };
 
     // Synchronisation logic:
@@ -204,12 +220,21 @@ var worker_function = function(self) {
     //  If this matches any LOCAL, delete the LOCAL.
 
 
-    var set_latest_remote = function(db,data) {
+    var store_remote_data = function(db,data) {
         var previous_remote = null;
         var previous_remote_value = null;
 
         return loop_cursor(db,data,function(cursor) {
-            if (cursor.value.source == 'remote') {
+
+            // We would like to get the most recently inserted
+            // remote data. This most recently inserted remote
+            // data block will be the one that all the local
+            // changes will be based upon. We can safely remove
+            // that remote, because we'd like to update the "parent"
+            // of all the other locals so that it matches this
+            // new remote (conflicts considered of course)
+
+            if (cursor.value.source === 'remote') {
 
                 // If for some reason, we get an out of order update,
                 // that is the remote value we get back is somehow
@@ -228,10 +253,10 @@ var worker_function = function(self) {
             }
             return true;
         }).then(function(store) {
-            console.log("Inserting REMOTE ",data);
-            store.put(data,[ data.element_id, data.page_id, data.modified, data.source]);
-            return store;
-        }).then(function(store) {
+
+            // The logic for the conflict resolution is done here
+            // by checking the values of all the local changes
+
             return loop_cursor(store,data,function(cursor) {
                 if (cursor.value.source !== 'local') {
                     return true;
@@ -245,31 +270,44 @@ var worker_function = function(self) {
                             return true;
                         }
                         console.log("We need to resolve a sync issue here");
+
                         // Simultaneous change on local and remote, decide which to keep
+                        // Need to break the promise chain somehow (set attribute on data?)
+                        // telling it not to insert the remote value
+
                     } else {
-                        // Values are the same, simply update the parent value
+                        // Values are the same, simply update the "parent" value
                         console.log("Updating local",cursor.value, " parent time to be ",data.modified);
                         cursor.value.parent = data.modified;
                         store.put(cursor.value,cursor.primaryKey);
                     }
                 } else if (cursor.value.parent.getTime() !== data.modified.getTime() ) {
+
+                    // If we have old local values that don't match up with any remote values
+                    // we can possibly get rid of them, since they're out of sync by at least
+                    // one revision
+
                     console.log("Local value with a parent that's old.. remove?",cursor.value);
                     store.delete(cursor.primaryKey);
                 }
                 return true;
             });
         }).then(function(store) {
+            // Conflicts are resolved, so we can insert this new remote
+
+            console.log("Inserting REMOTE ",data);
+
             store.put(data,[data.element_id,data.page_id,data.modified,data.source]);
             return store;
         }).then(end_transaction);
     };
 
-    var set_latest_local = function(db,data) {
+    var store_local_data = function(db,data) {
         return loop_cursor(db,data,function(cursor) {
-            if (cursor.value.source == 'local') {
+            if (cursor.value.source === 'local') {
                 cursor.source.objectStore.delete(cursor.primaryKey);
             }
-            if (cursor.value.source == 'remote' && ! data.parent) {
+            if (cursor.value.source === 'remote' && ! data.parent) {
                 data.parent = cursor.value.modified;
                 if (cursor.value.value === data.value) {
                     data.synced = true;
@@ -287,17 +325,35 @@ var worker_function = function(self) {
     var resolve_lastest_data = function(data) {
         return local_db.then(function(db) {
             if (data.source === "local") {
-                return set_latest_local(db,data);
+                return store_local_data(db,data);
             }
             if (data.source === "remote") {
-                return set_latest_remote(db,data);
+                return store_remote_data(db,data);
             }
+        });
+    };
+
+    var get_latest_data = function(page_id,element_id) {
+        var wanted_data = null;
+        return local_db.then(function(db) {
+            return loop_cursor(db,{"page_id" : parseInt(page_id), "element_id" : parseInt(element_id) },function(cursor) {
+                if (cursor.value.source === 'local') {
+                    wanted_data = cursor.value;
+                    return false;
+                } else if ( ! wanted_data ) {
+                    wanted_data = cursor.value;
+                }
+                return true;
+            });
+        }).then(function() {
+            return wanted_data;
         });
     };
 
     resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date() , 'value' : 'Foo' }).then(function() {
         console.log("Inserted remote into DB");
     });
+
     setTimeout(function() {
         resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(1999, 12, 12, 23, 59), 'value' : 'Bar' }).then(function() {
             console.log("Failed test: Inserted BAD remote into DB");
@@ -365,7 +421,7 @@ var worker_function = function(self) {
     }, false);
 
 };
-if ("Worker" in window && window.location.hash == '') {
+if ("Worker" in window && window.location.hash === '') {
     window.OneNoteSync = (function() {
         console.log("Defining worker");
         var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
@@ -382,6 +438,15 @@ if ("Worker" in window && window.location.hash == '') {
             console.log(err);
         });
 
+        common_worker.addEventListener('message',function(e) {
+            if (e.data) {
+                if (e.data.event) {
+                    console.log("Received event",e.data);
+                }
+            }
+        });
+
+
         var worker_method = function(method,args) {
             return new Promise(function(resolve,reject) {
                 var message_block = { 'method' : method,
@@ -391,7 +456,7 @@ if ("Worker" in window && window.location.hash == '') {
 
                 var receive_func = function(e) {
                     if (e.data) {
-                        if (e.data.message_id == message_block.message_id) {
+                        if (e.data.message_id === message_block.message_id) {
                             resolve(e.data.value);
                         }
                         // We should handle the error cases in here too.
