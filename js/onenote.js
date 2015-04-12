@@ -29,6 +29,50 @@ var worker_function = function(self) {
         };
     });
 
+    var db_cursor = function(idx,range,callback) {
+        return new Promise(function(resolve,reject) {
+            // We wish to loop through the data from
+            // the newest entries added to the oldest entries
+            var key_cursor = idx.openCursor(range,"prev");
+            key_cursor.onsuccess = function() {
+                var cursor = key_cursor.result;
+                if (cursor) {
+                    try {
+                        var retval = callback(cursor);
+                    } catch (e) {
+                        reject(e);
+                    }
+                    if (retval) {
+                        cursor.continue();
+                    } else {
+                        resolve();
+                    }
+                } else {
+                    resolve();
+                }
+            };
+            key_cursor.onerror = function() {
+                reject();
+            };
+        });
+    };
+
+    var loop_cursor = function(db,data,callback) {
+        var store = db instanceof IDBObjectStore ? db : db.transaction('syncelements', "readwrite").objectStore('syncelements');
+        var elements_idx = store.index('by_elements');
+        var range = IDBKeyRange.only([data.element_id,data.page_id]);
+        return db_cursor(elements_idx,range,callback).then(function() { return store; });
+    };
+
+    var end_transaction = function(store) {
+        return new Promise(function(resolve,reject) {
+            store.transaction.oncomplete = resolve;
+            store.transaction.onerror = function(ev) {
+                reject(store.transaction.error);
+            };
+        });
+    };
+
     var methods = {
         'add_document' : function(document_id) {
             if ( ! element_paths[document_id]) {
@@ -143,61 +187,87 @@ var worker_function = function(self) {
 //      postMessage({ 'method' : 'elementChanged' });
     };
 
-    var db_cursor = function(idx,range,callback) {
-        return new Promise(function(resolve,reject) {
-            var key_cursor = idx.openCursor(range,"prev");
-            key_cursor.onsuccess = function() {
-                var cursor = key_cursor.result;
-                if (cursor) {
-                    var retval = callback(cursor);
-                    if (retval) {
-                        cursor.continue();
-                    } else {
-                        resolve();
-                    }
-                } else {
-                    resolve();
-                }
-            };
-            key_cursor.onerror = function() {
-                reject();
-            };
-        });
-    };
+    // Synchronisation logic:
+    // If the source is LOCAL
+    //  Mark older LOCAL entries as "old" / REMOVE
+    //  Add the data entry in, and mark the "parent" as the last remote data
+
+    // If the source is REMOTE
+    //  If data is null - then we want to kill the sync for any LOCALS that might want to sync
+    //  If this entry already exists - do nothing
+    //  If this entry already exists as the most new REMOTE entry (but with an older timestamp),
+    //      add new entry with new timestamp. Update all LOCAL entries to use the new
+    //      timestamp entry. Delete the old REMOTE entry
+    //  If there are LOCAL entries that refer to existing REMOTE
+    //      THROW error - pause sync until this is resolved?
+    //  If the most new entry is REMOTE, remove the old one, and insert this new one.
+    //  If this matches any LOCAL, delete the LOCAL.
+
 
     var set_latest_remote = function(db,data) {
-        var store = db.transaction('syncelements', "readwrite").objectStore('syncelements');
-        store.put(data,[ data.element_id, data.page_id, data.modified, data.source]);
-        var elements_idx = store.index('by_elements');
-        var range = IDBKeyRange.only([data.element_id,data.page_id]);
         var previous_remote = null;
         var previous_remote_value = null;
-        return db_cursor(elements_idx,range,function(cursor) {
+
+        return loop_cursor(db,data,function(cursor) {
             if (cursor.value.source == 'remote') {
+
+                // If for some reason, we get an out of order update,
+                // that is the remote value we get back is somehow
+                // older than a remote value we already have, then
+                // simply stop adding this remote value in.
+
+                if (cursor.value.modified.getTime() > data.modified.getTime()) {
+                    throw new Error("Out of order remote value (have newer remote value)");
+                }
+
                 previous_remote = cursor.value.modified;
                 previous_remote_value = cursor.value.value;
-                store.delete(cursor.primaryKey);
+                console.log("Deleting REMOTE ",cursor.primaryKey);
+                cursor.source.objectStore.delete(cursor.primaryKey);
+                return false;
             }
-            return false;
-        }).then(function() {
-            // update locals , resolving conflicts.
-        }).then(function() {
+            return true;
+        }).then(function(store) {
+            console.log("Inserting REMOTE ",data);
+            store.put(data,[ data.element_id, data.page_id, data.modified, data.source]);
+            return store;
+        }).then(function(store) {
+            return loop_cursor(store,data,function(cursor) {
+                if (cursor.value.source !== 'local') {
+                    return true;
+                }
+                if (cursor.value.parent.getTime() === previous_remote.getTime() ) {
+                    if ( previous_remote_value !== data.value ) {
+                        if (data.value === cursor.value.value) {
+                            // We got a remote value matching this local value
+                            // we can get rid of the local value
+                            store.delete(cursor.primaryKey);
+                            return true;
+                        }
+                        console.log("We need to resolve a sync issue here");
+                        // Simultaneous change on local and remote, decide which to keep
+                    } else {
+                        // Values are the same, simply update the parent value
+                        console.log("Updating local",cursor.value, " parent time to be ",data.modified);
+                        cursor.value.parent = data.modified;
+                        store.put(cursor.value,cursor.primaryKey);
+                    }
+                } else if (cursor.value.parent.getTime() !== data.modified.getTime() ) {
+                    console.log("Local value with a parent that's old.. remove?",cursor.value);
+                    store.delete(cursor.primaryKey);
+                }
+                return true;
+            });
+        }).then(function(store) {
             store.put(data,[data.element_id,data.page_id,data.modified,data.source]);
-        }).then(new Promise(function(resolve,reject) {
-            store.transaction.oncomplete = resolve;
-            store.transaction.onerror = function(ev) {
-                reject(store.transaction.error);
-            };
-        }));
+            return store;
+        }).then(end_transaction);
     };
 
     var set_latest_local = function(db,data) {
-        var store = db.transaction('syncelements', "readwrite").objectStore('syncelements');
-        var elements_idx = store.index('by_elements');
-        var range = IDBKeyRange.only([data.element_id,data.page_id]);
-        return db_cursor(elements_idx,range,function(cursor) {
+        return loop_cursor(db,data,function(cursor) {
             if (cursor.value.source == 'local') {
-                store.delete(cursor.primaryKey);
+                cursor.source.objectStore.delete(cursor.primaryKey);
             }
             if (cursor.value.source == 'remote' && ! data.parent) {
                 data.parent = cursor.value.modified;
@@ -206,21 +276,16 @@ var worker_function = function(self) {
                 }
             }
             return true;
-        }).then(function() {
+        }).then(function(store) {
             if ( ! data.synced ) {
                 store.put(data,[data.element_id,data.page_id,data.modified,data.source]);
             }
-        }).then(new Promise(function(resolve,reject) {
-            store.transaction.oncomplete = resolve;
-            store.transaction.onerror = function(ev) {
-                reject(store.transaction.error);
-            };
-        }));
+            return store;
+        }).then(end_transaction);
     };
 
     var resolve_lastest_data = function(data) {
         return local_db.then(function(db) {
-            console.log("Firing off the action");
             if (data.source === "local") {
                 return set_latest_local(db,data);
             }
@@ -228,43 +293,42 @@ var worker_function = function(self) {
                 return set_latest_remote(db,data);
             }
         });
-        // DB contains all entries keyed by Element ID, Document ID, source (remote/local)
-        // Also contains a key for modified
-
-        // If the source is LOCAL
-        //  Mark older LOCAL entries as "old" / REMOVE
-        //  Add the data entry in, and mark the "parent" as the last remote data
-
-        // If the source is REMOTE
-        //  If data is null - then we want to kill the sync for any LOCALS that might want to sync
-        //  If this entry already exists - do nothing
-        //  If this entry already exists as the most new REMOTE entry (but with an older timestamp),
-        //      add new entry with new timestamp. Update all LOCAL entries to use the new
-        //      timestamp entry. Delete the old REMOTE entry
-        //  If there are LOCAL entries that refer to existing REMOTE
-        //      THROW error - pause sync until this is resolved?
-        //  If the most new entry is REMOTE, remove the old one, and insert this new one.
-        //  If this matches any LOCAL, delete the LOCAL.
     };
 
     resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date() , 'value' : 'Foo' }).then(function() {
         console.log("Inserted remote into DB");
     });
     setTimeout(function() {
+        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(1999, 12, 12, 23, 59), 'value' : 'Bar' }).then(function() {
+            console.log("Failed test: Inserted BAD remote into DB");
+        },function() {
+            console.log("Correctly did not insert bad remote into DB");
+        });
+    },1000);
+
+    setTimeout(function() {
         resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(), 'value' : 'Bar' }).then(function() {
             console.log("Inserted remote 2 into DB");
         });
-    },2000);
+    },5000);
     setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'local', 'modified' : new Date(), 'value' : 'Bar' }).then(function() {
-            console.log("Inserted local into DB");
-        });
-    },3000);
-    setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'local', 'modified' : new Date(), 'value' : 'Baz' }).then(function() {
-            console.log("Inserted local into DB");
+        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'local', 'modified' : new Date(), 'value' : 'Barr' }).then(function() {
+            console.log("Inserted local 1 into DB");
         });
     },10000);
+
+    setTimeout(function() {
+        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(), 'value' : 'Barro' }).then(function() {
+            console.log("Inserted remote 3 into DB");
+        });
+    },15000);
+
+
+    setTimeout(function() {
+        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'local', 'modified' : new Date(), 'value' : 'Baz' }).then(function() {
+            console.log("Inserted local 2 into DB");
+        });
+    },16000);
 
     var do_api_call = function(url,token,xml,params) {
         if (params) {
