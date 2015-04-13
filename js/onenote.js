@@ -1,10 +1,5 @@
 var worker_function = function(self) {
 
-    const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
-    const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
-    const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime&filter=lastModifiedTime gt 2015-01-01T13:19:47.043Z";
-    const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
-
     var local_db = new Promise(function(resolve,reject){
         var request = indexedDB.open("onenote",2);
         var db = null;
@@ -85,7 +80,7 @@ var worker_function = function(self) {
             return document_id;
         },
         'watch_element' : function(document_id,element_id) {
-            add_document(document_id);
+            methods['add_document'](document_id);
 
             if (element_paths[document_id].indexOf(element_id) < 0) {
                 element_paths[document_id].push(element_id);
@@ -103,7 +98,7 @@ var worker_function = function(self) {
         'set_values' : function(document_id,element_id,values) {
             // Set the values back into the element that
             // we pulled data out of.
-            return resolve_lastest_data({ 'page_id' : document_id,
+            return resolve_latest_data({ 'page_id' : document_id,
                                           'element_id' : element_id,
                                           'source' : 'local',
                                           'modified' : new Date() ,
@@ -118,11 +113,6 @@ var worker_function = function(self) {
             // oauth tokens when the current one expires
             return "All ok";
         },
-        'list_notebooks' : function() {
-            return do_api_call(list_notebooks_url,this.token).then(function(json) {
-                return json.value;
-            });
-        },
         'sync' : function() {
             synchronise_documents();
             return "OK";
@@ -132,21 +122,23 @@ var worker_function = function(self) {
     // What we use to extract out the elements
     var element_paths = {}; //{ 'document_id' : [ '#element_identifier' ] };
 
-    var extracted = { 1 : { 2 : null } };
+    var extracted = { "1" : { "2" : null } };
 
     var database_watcher = function() {
         var ids_to_watch = [];
         Object.keys(extracted).forEach(function(page_id) {
             ids_to_watch = ids_to_watch.concat(Object.keys(extracted[page_id]).map(function(el_id) {  return [page_id,el_id]; }));
         });
-
         Promise.all( ids_to_watch.map( function(ids) { return get_latest_data(ids[0],ids[1]); } ) ).then(
         function(vals) {
             vals.forEach(function(val) {
+                if ( ! val ) {
+                    return;
+                }
                 if (extracted[val.page_id][val.element_id] != val.value) {
-                    console.log("Changed value for ",val.page_id,val.element_id,"from",extracted[val.page_id][val.element_id],val.value);
+                    console.log("Changed value for ",val.page_id,val.element_id,"from",extracted[val.page_id][val.element_id], JSON.parse(val.value) );
                     extracted[val.page_id][val.element_id] = val.value;
-                    postMessage({"event" : "change", "element_id" : val.element_id, "page_id" : val.page_id, "value" : val.value });
+                    postMessage({"event" : "change", "element_id" : val.element_id, "page_id" : val.page_id, "value" : JSON.parse(val.value) });
                 }
             });
         });
@@ -156,16 +148,11 @@ var worker_function = function(self) {
 
     //var doc_watcher_timeout = setTimeout(synchronise_documents,5*60*1000);
 
-    // OneNote specific methods:
-    // extract_content
-    // write_content
-    // patch_page
-
-
     // Supply a constructor for notebook engine
 
-    var synchronise_documents = function() {
+    syncEngine = null;
 
+    var synchronise_documents = function() {
         if (Object.keys(element_paths).length < 1) {
             return;
         }
@@ -173,57 +160,25 @@ var worker_function = function(self) {
         // Set a lock on the sync function so we know
         // that we're in the middle of a sync run
 
-        do_api_call(list_updated_pages_url,token,false).then(function(data) {
-            var current_keys = Object.keys(element_paths);
-            console.log(data);
-            var new_pages = data.value.filter(function(page) { return current_keys.indexOf(page.id) >= 0; });
-            return new_pages;
-        }).then(function(page_ids) {
-
-            // We should really serialise this process here to avoid hammering the servers
-
-            var promises = page_ids.map(function(page) {
-                    return do_api_call(get_page_content_url,token,true, { "ID" : page.id }).then(
-                        function(content) {
-                            content.id = page.id;
-                            content.modified = page.lastModifiedTime;
-                            content.title = page.title;
-                            return content;
-                        });
-                });
-            return Promise.all(promises);
-        }).then(function(contents) {
-
-            // Extract content and store in localhost
-
-            var promises = [];
-            contents.forEach(function(content) {
-
-                console.log(content);
-
-                // FIXME: Need to handle deleted pages on the server too
-
-                promises = promises.concat(element_paths[content.id].map(function(element_id) {
-                    var value = JSON.stringify(extract_content( content, element_id ));
-                    resolve_lastest_data( { 'page_id': content.id, 'element_id': element_id, 'modified' : content.modified, 'source' : 'remote', 'value' : value });
-                }));
-            });
-            return Promise.all(promises);
-
+        return syncEngine.downloadRemoteContent(element_paths).then(function(contents) {
+            return Promise.all(contents.map(function(content) {
+                return resolve_latest_data(content);
+            }));
         }).then(function() {
             var ids_to_check = [];
             Object.keys(element_paths).forEach(function(page_id) {
-                ids_to_watch = ids_to_watch.concat(element_paths[page_id].map(function(el_id) {  return [page_id,el_id]; }));
+                ids_to_check = ids_to_check.concat(element_paths[page_id].map(function(el_id) {  return [page_id,el_id]; }));
             });
-            return Promise.all(ids_to_check.map( function(ids) { return get_latest_data(ids[0],ids[1]); } )).then(function(datas) {
-                datas.map(function(data) {
+            var local_entries = Promise.all(ids_to_check.map( function(ids) { return get_latest_data(ids[0],ids[1],true); } ));
+            return local_entries.then(function(datas) {
+                return Promise.all(datas.map(function(data) {
                     if ( ! data ) {
                         return true;
                     }
-                    return patch_page(data.page_id,data.element_id,write_content(JSON.parse(data.value))).then(function(patched_data) {
-                        return resolve_lastest_data(patched_data);
+                    return syncEngine.sendData({ 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : JSON.parse(data.value) }).then(function(patched_data) {
+                        return resolve_latest_data(patched_data);
                     });
-                });
+                }));
             });
         });
 
@@ -341,7 +296,7 @@ var worker_function = function(self) {
         }).then(end_transaction);
     };
 
-    var resolve_lastest_data = function(data) {
+    var resolve_latest_data = function(data) {
         return local_db.then(function(db) {
             if (data.source === "local") {
                 return store_local_data(db,data);
@@ -355,7 +310,7 @@ var worker_function = function(self) {
     var get_latest_data = function(page_id,element_id,only_local) {
         var wanted_data = null;
         return local_db.then(function(db) {
-            return loop_cursor(db,{"page_id" : parseInt(page_id), "element_id" : parseInt(element_id) },function(cursor) {
+            return loop_cursor(db,{"page_id" : page_id, "element_id" : element_id },function(cursor) {
                 if (cursor.value.source === 'local') {
                     wanted_data = cursor.value;
                     return false;
@@ -391,6 +346,8 @@ var worker_function = function(self) {
         });
     };
 
+    self.do_api_call = do_api_call;
+
     self.addEventListener('message', function(e) {
         if (e.data) {
             if (e.data.import_script) {
@@ -404,12 +361,94 @@ var worker_function = function(self) {
     }, false);
 
 };
+
+var onenoteEngine = function onenoteEngine(env) {
+
+    const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
+    const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
+    const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime&filter=lastModifiedTime gt 2015-01-01T13:19:47.043Z";
+    const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
+
+    var engine = function() {
+    };
+
+    engine.registerMethods = function(methods) {
+        methods['list_notebooks'] = function() {
+            return env.do_api_call(list_notebooks_url,env.token).then(function(json) {
+                return json.value;
+            });
+        };
+    };
+
+    var get_updated_pages = function(element_paths) {
+        return env.do_api_call(list_updated_pages_url,env.token,false).then(function(data) {
+            var current_keys = Object.keys(element_paths);
+            var new_pages = data.value.filter(function(page) { return current_keys.indexOf(page.id) >= 0; });
+            return new_pages;
+        });
+    };
+
+    var get_page_contents = function(page_ids) {
+
+        // We should really serialise this process here to avoid hammering the servers
+        var promises = page_ids.map(function(page) {
+                return env.do_api_call(get_page_content_url,env.token,true, { "ID" : page.id }).then(
+                    function(content) {
+                        content.id = page.id;
+                        content.modified = new Date(page.lastModifiedTime);
+                        content.title = page.title;
+                        return content;
+                    });
+            });
+
+        return Promise.all(promises);
+
+    };
+
+    var extract_content = function(content, element_id) {
+        return content.attributes;
+    };
+
+    var extract_contents = function(element_paths,contents) {
+
+        // Extract content and store in localhost
+
+        var values = [];
+        contents.forEach(function(content) {
+            values = values.concat(element_paths[content.id].map(function(element_id) {
+                var value = JSON.stringify(extract_content( content[0], element_id ));
+                return { 'page_id': content.id, 'element_id': element_id, 'modified' : content.modified, 'source' : 'remote', 'value' : value };
+            }));
+        });
+        return values;
+
+    };
+
+    engine.downloadRemoteContent = function(element_paths) {
+        return get_updated_pages(element_paths).then(get_page_contents).then(function(contents) {
+            return(extract_contents(element_paths,contents));
+        });
+    };
+
+    engine.sendData = function(data) {
+        console.log("Sending data",data);
+        // do_api_call write_content(data.value)
+        data.value = JSON.stringify(data.value);
+        data.source = 'remote';
+        data.modified = new Date();
+        return new Promise(data);
+    };
+
+    self.OneNoteSyncEngine = engine;
+};
+
 if ("Worker" in window && window.location.hash === '') {
     window.OneNoteSync = (function() {
         console.log("Defining worker");
         var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
         common_worker.postMessage();
         common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()], {'type' : 'text/javascript'})) });
+        common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([onenoteEngine.toString()+"\nonenoteEngine(this); syncEngine = OneNoteSyncEngine;"], {'type' : 'text/javascript'})) });
         WL.init({
             client_id: '000000004C14DD4A',
             redirect_uri: 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html',
@@ -473,6 +512,10 @@ if ("Worker" in window && window.location.hash === '') {
 
         OneNoteSync.prototype.addDocument = function(doc) {
             return worker_method('add_document', [ doc ]);
+        };
+
+        OneNoteSync.prototype.watchElement = function(doc,element) {
+            return worker_method('watch_element', [ doc, element ]);
         };
 
         OneNoteSync.prototype.sync = function() {
