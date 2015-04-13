@@ -13,7 +13,9 @@ var worker_function = function(self) {
         };
         request.onupgradeneeded = function(event) {
             db = event.target.result;
-            db.deleteObjectStore('syncelements');
+            if (db.objectStoreNames.contains('syncelements')) {
+                db.deleteObjectStore('syncelements');
+            }
             var objectStore = db.createObjectStore("syncelements");
             // Allow us to search by last modified (so we can get the latest data quickly)
             objectStore.createIndex("by_modified",["element_id","page_id","modified"],{unique:false});
@@ -154,6 +156,14 @@ var worker_function = function(self) {
 
     //var doc_watcher_timeout = setTimeout(synchronise_documents,5*60*1000);
 
+    // OneNote specific methods:
+    // extract_content
+    // write_content
+    // patch_page
+
+
+    // Supply a constructor for notebook engine
+
     var synchronise_documents = function() {
 
         if (Object.keys(element_paths).length < 1) {
@@ -183,15 +193,37 @@ var worker_function = function(self) {
                 });
             return Promise.all(promises);
         }).then(function(contents) {
+
+            // Extract content and store in localhost
+
+            var promises = [];
             contents.forEach(function(content) {
-                // Loop through here, extracting the correct ID and data structure for
-                // everything that we want to sync with.
+
                 console.log(content);
 
-                // Store all this data in local storage along with the date that the
-                // page was last modified
+                // FIXME: Need to handle deleted pages on the server too
 
-                // Need to handle deleted pages on the server too
+                promises = promises.concat(element_paths[content.id].map(function(element_id) {
+                    var value = JSON.stringify(extract_content( content, element_id ));
+                    resolve_lastest_data( { 'page_id': content.id, 'element_id': element_id, 'modified' : content.modified, 'source' : 'remote', 'value' : value });
+                }));
+            });
+            return Promise.all(promises);
+
+        }).then(function() {
+            var ids_to_check = [];
+            Object.keys(element_paths).forEach(function(page_id) {
+                ids_to_watch = ids_to_watch.concat(element_paths[page_id].map(function(el_id) {  return [page_id,el_id]; }));
+            });
+            return Promise.all(ids_to_check.map( function(ids) { return get_latest_data(ids[0],ids[1]); } )).then(function(datas) {
+                datas.map(function(data) {
+                    if ( ! data ) {
+                        return true;
+                    }
+                    return patch_page(data.page_id,data.element_id,write_content(JSON.parse(data.value))).then(function(patched_data) {
+                        return resolve_lastest_data(patched_data);
+                    });
+                });
             });
         });
 
@@ -202,23 +234,6 @@ var worker_function = function(self) {
 
         // Make sure we fire off a db check immediately after the sync process? (database_watcher method)
     };
-
-    // Synchronisation logic:
-    // If the source is LOCAL
-    //  Mark older LOCAL entries as "old" / REMOVE
-    //  Add the data entry in, and mark the "parent" as the last remote data
-
-    // If the source is REMOTE
-    //  If data is null - then we want to kill the sync for any LOCALS that might want to sync
-    //  If this entry already exists - do nothing
-    //  If this entry already exists as the most new REMOTE entry (but with an older timestamp),
-    //      add new entry with new timestamp. Update all LOCAL entries to use the new
-    //      timestamp entry. Delete the old REMOTE entry
-    //  If there are LOCAL entries that refer to existing REMOTE
-    //      THROW error - pause sync until this is resolved?
-    //  If the most new entry is REMOTE, remove the old one, and insert this new one.
-    //  If this matches any LOCAL, delete the LOCAL.
-
 
     var store_remote_data = function(db,data) {
         var previous_remote = null;
@@ -269,11 +284,15 @@ var worker_function = function(self) {
                             store.delete(cursor.primaryKey);
                             return true;
                         }
-                        console.log("We need to resolve a sync issue here");
 
-                        // Simultaneous change on local and remote, decide which to keep
-                        // Need to break the promise chain somehow (set attribute on data?)
-                        // telling it not to insert the remote value
+                        console.log("Resolving conflict, trusting LOCAL data");
+
+                        // By setting the parent to be the modified marker
+                        // for this remote data, we accept the latest server state
+                        // while also keeping the local changes
+
+                        cursor.value.parent = data.modified;
+                        store.put(cursor.value,cursor.primaryKey);
 
                     } else {
                         // Values are the same, simply update the "parent" value
@@ -333,14 +352,14 @@ var worker_function = function(self) {
         });
     };
 
-    var get_latest_data = function(page_id,element_id) {
+    var get_latest_data = function(page_id,element_id,only_local) {
         var wanted_data = null;
         return local_db.then(function(db) {
             return loop_cursor(db,{"page_id" : parseInt(page_id), "element_id" : parseInt(element_id) },function(cursor) {
                 if (cursor.value.source === 'local') {
                     wanted_data = cursor.value;
                     return false;
-                } else if ( ! wanted_data ) {
+                } else if ( ! wanted_data && ! only_local ) {
                     wanted_data = cursor.value;
                 }
                 return true;
@@ -349,42 +368,6 @@ var worker_function = function(self) {
             return wanted_data;
         });
     };
-
-    resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date() , 'value' : 'Foo' }).then(function() {
-        console.log("Inserted remote into DB");
-    });
-
-    setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(1999, 12, 12, 23, 59), 'value' : 'Bar' }).then(function() {
-            console.log("Failed test: Inserted BAD remote into DB");
-        },function() {
-            console.log("Correctly did not insert bad remote into DB");
-        });
-    },1000);
-
-    setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(), 'value' : 'Bar' }).then(function() {
-            console.log("Inserted remote 2 into DB");
-        });
-    },5000);
-    setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'local', 'modified' : new Date(), 'value' : 'Barr' }).then(function() {
-            console.log("Inserted local 1 into DB");
-        });
-    },10000);
-
-    setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'remote', 'modified' : new Date(), 'value' : 'Barro' }).then(function() {
-            console.log("Inserted remote 3 into DB");
-        });
-    },15000);
-
-
-    setTimeout(function() {
-        resolve_lastest_data({ 'page_id' : 1, 'element_id' : 2, 'source' : 'local', 'modified' : new Date(), 'value' : 'Baz' }).then(function() {
-            console.log("Inserted local 2 into DB");
-        });
-    },16000);
 
     var do_api_call = function(url,token,xml,params) {
         if (params) {
