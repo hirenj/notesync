@@ -1,7 +1,7 @@
 var worker_function = function(self) {
 
     var local_db = new Promise(function(resolve,reject){
-        var request = indexedDB.open("onenote",2);
+        var request = indexedDB.open("onenote",3);
         var db = null;
         request.onerror = function(event){
             reject();
@@ -11,6 +11,12 @@ var worker_function = function(self) {
             if (db.objectStoreNames.contains('syncelements')) {
                 db.deleteObjectStore('syncelements');
             }
+            if (db.objectStoreNames.contains('synclocks')) {
+                db.deleteObjectStore('synclocks');
+            }
+
+            db.createObjectStore('synclocks');
+
             var objectStore = db.createObjectStore("syncelements");
             // Allow us to search by last modified (so we can get the latest data quickly)
             objectStore.createIndex("by_modified",["element_id","page_id","modified"],{unique:false});
@@ -57,7 +63,7 @@ var worker_function = function(self) {
     var loop_cursor = function(db,data,callback) {
         var store = db instanceof IDBObjectStore ? db : db.transaction('syncelements', "readwrite").objectStore('syncelements');
         var elements_idx = store.index('by_elements');
-        var range = IDBKeyRange.only([data.element_id,data.page_id]);
+        var range = data ? IDBKeyRange.only([data.element_id,data.page_id]) : null;
         return db_cursor(elements_idx,range,callback).then(function() { return store; });
     };
 
@@ -76,7 +82,6 @@ var worker_function = function(self) {
                 element_paths[document_id] = [];
                 extracted[document_id] = {};
             }
-            console.log(document_id);
             return document_id;
         },
         'watch_element' : function(document_id,element_id) {
@@ -114,15 +119,14 @@ var worker_function = function(self) {
             return "All ok";
         },
         'sync' : function() {
-            synchronise_documents();
-            return "OK";
+            return lock_and_synchronise();
         }
     };
 
     // What we use to extract out the elements
     var element_paths = {}; //{ 'document_id' : [ '#element_identifier' ] };
 
-    var extracted = { "1" : { "2" : null } };
+    var extracted = {};
 
     var database_watcher = function() {
         var ids_to_watch = [];
@@ -146,11 +150,25 @@ var worker_function = function(self) {
 
     setInterval(database_watcher,1000);
 
-    //var doc_watcher_timeout = setTimeout(synchronise_documents,5*60*1000);
+    var read_synced_ids = function() {
+        return local_db.then(function(db) {
+            loop_cursor(db,null,function(cursor) {
+                methods['watch_element'](cursor.value.page_id,cursor.value.element_id);
+            });
+        });
+    };
+
+
+    var doc_watcher_timeout = setInterval(lock_and_synchronise,5*60*1000);
 
     // Supply a constructor for notebook engine
 
     syncEngine = null;
+    var lock_and_synchronise = function() {
+        return obtain_lock().then(function() {
+            return synchronise_documents().catch(function() { return Promise.resolve(true); });
+        }).then(release_lock);
+    };
 
     var synchronise_documents = function() {
         if (Object.keys(element_paths).length < 1) {
@@ -159,8 +177,9 @@ var worker_function = function(self) {
 
         // Set a lock on the sync function so we know
         // that we're in the middle of a sync run
-
-        return syncEngine.downloadRemoteContent(element_paths).then(function(contents) {
+        return  get_sync_time().then(function(time) {
+            return syncEngine.downloadRemoteContent(element_paths,time).then(write_sync_time);
+        }).then(function(contents) {
             return Promise.all(contents.map(function(content) {
                 return resolve_latest_data(content);
             }));
@@ -175,19 +194,13 @@ var worker_function = function(self) {
                     if ( ! data ) {
                         return true;
                     }
-                    return syncEngine.sendData({ 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : JSON.parse(data.value) }).then(function(patched_data) {
-                        return resolve_latest_data(patched_data);
+                    var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'modified' : new Date(), 'source' : 'remote' };
+                    return syncEngine.sendData(send_block).then(function(patched_data) {
+                        return resolve_latest_data(send_block);
                     });
                 }));
             });
         });
-
-        // Check changed
-
-        // Post changes that need to be synced in one block of operations
-        // After doing/verifying the upload on a local, add a remote entry in with a guessed modified time
-
-        // Make sure we fire off a db check immediately after the sync process? (database_watcher method)
     };
 
     var store_remote_data = function(db,data) {
@@ -324,6 +337,76 @@ var worker_function = function(self) {
         });
     };
 
+    var store_get = function(store,key) {
+        var req = store.get(key);
+        return new Promise(function(resolve,reject){
+            req.onsuccess = function(event) {
+                resolve(req.result);
+            };
+            req.onerror = function(event) {
+                reject();
+            };
+        });
+    };
+
+    var store_put = function(store,key,value) {
+        var req = value ? store.put(value,key) : store.delete(key);
+        return new Promise(function(resolve,reject){
+            req.onsuccess = function(event) {
+                resolve(req.result);
+            };
+            req.onerror = function(event) {
+                reject();
+            };
+        });
+    };
+
+
+    var obtain_lock = function() {
+        return local_db.then(function(db) {
+            var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
+            return store_get( store, "lock").then(function(lock) {
+                var lock_timedout = lock ? new Date() >= (new Date(lock.time.getTime() + 30*60000)) : true;
+                if ( ! lock_timedout ) {
+                    console.log("Already syncing - not doing anything");
+                    return Promise.reject(false);
+                }
+                return store_put( store ,'lock',{'time' : new Date(), 'lock' : 'lock' }).then(function(locked) {
+                    console.log("Obtained LOCK for sync");
+                });
+            });
+        });
+    };
+
+    var release_lock = function() {
+        return local_db.then(function(db) {
+            var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
+            return store_get( store, "lock").then(function(lock) {
+                if (lock) {
+                    console.log("Releasing LOCK for sync");
+                    return store_put( store ,'lock');
+                }
+            });
+        });
+    };
+
+    var get_sync_time = function() {
+        return local_db.then(function(db) {
+            var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
+            return store_get( store, "synctime" ).then(function(synctime) {
+                return synctime ? synctime.time : new Date(0,0,0);
+            });
+        });
+    };
+
+    var write_sync_time = function() {
+        return local_db.then(function(db) {
+            var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
+            return store_put( store, "synctime", {'time' : new Date(), 'synctime' : 'synctime' } );
+        });
+    };
+
+
     var do_api_call = function(url,token,xml,params) {
         if (params) {
             Object.keys(params).forEach(function(par) {
@@ -347,6 +430,11 @@ var worker_function = function(self) {
     };
 
     self.do_api_call = do_api_call;
+    self.methods = methods;
+
+    read_synced_ids().then(function() {
+        lock_and_synchronise();
+    });
 
     self.addEventListener('message', function(e) {
         if (e.data) {
@@ -366,22 +454,30 @@ var onenoteEngine = function onenoteEngine(env) {
 
     const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
-    const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime&filter=lastModifiedTime gt 2015-01-01T13:19:47.043Z";
+    const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime&filter=lastModifiedTime gt <TIME>";
     const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
 
     var engine = function() {
     };
 
-    engine.registerMethods = function(methods) {
-        methods['list_notebooks'] = function() {
+    engine.registerMethods = function() {
+        env.methods['list_notebooks'] = function() {
+
+            if ( ! env.token ) {
+                throw new Error("No AUTH token");
+            }
+
             return env.do_api_call(list_notebooks_url,env.token).then(function(json) {
                 return json.value;
             });
         };
     };
 
-    var get_updated_pages = function(element_paths) {
-        return env.do_api_call(list_updated_pages_url,env.token,false).then(function(data) {
+    var get_updated_pages = function(element_paths,last_sync) {
+        if ( ! env.token ) {
+            throw new Error("No AUTH token");
+        }
+        return env.do_api_call(list_updated_pages_url,env.token,false, {"TIME" : last_sync.toISOString() }).then(function(data) {
             var current_keys = Object.keys(element_paths);
             var new_pages = data.value.filter(function(page) { return current_keys.indexOf(page.id) >= 0; });
             return new_pages;
@@ -389,6 +485,10 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     var get_page_contents = function(page_ids) {
+
+        if ( ! env.token ) {
+            throw new Error("No AUTH token");
+        }
 
         // We should really serialise this process here to avoid hammering the servers
         var promises = page_ids.map(function(page) {
@@ -424,8 +524,8 @@ var onenoteEngine = function onenoteEngine(env) {
 
     };
 
-    engine.downloadRemoteContent = function(element_paths) {
-        return get_updated_pages(element_paths).then(get_page_contents).then(function(contents) {
+    engine.downloadRemoteContent = function(element_paths,last_sync) {
+        return get_updated_pages(element_paths,last_sync).then(get_page_contents).then(function(contents) {
             return(extract_contents(element_paths,contents));
         });
     };
@@ -438,6 +538,8 @@ var onenoteEngine = function onenoteEngine(env) {
         data.modified = new Date();
         return new Promise(data);
     };
+
+    engine.registerMethods();
 
     self.OneNoteSyncEngine = engine;
 };
