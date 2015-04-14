@@ -1,4 +1,5 @@
 var worker_function = function(self) {
+    "use strict";
 
     var local_db = new Promise(function(resolve,reject){
         var request = indexedDB.open("onenote",3);
@@ -113,7 +114,7 @@ var worker_function = function(self) {
                                       });
         },
         'set_oauth_token' : function(token) {
-            this.token = token;
+            self.token = token;
             // Make sure we can fire events to obtain new
             // oauth tokens when the current one expires
             return "All ok";
@@ -163,7 +164,8 @@ var worker_function = function(self) {
 
     // Supply a constructor for notebook engine
 
-    syncEngine = null;
+    self.syncEngine = null;
+
     var lock_and_synchronise = function() {
         return obtain_lock().then(function() {
             return synchronise_documents().catch(function() { return Promise.resolve(true); });
@@ -178,7 +180,9 @@ var worker_function = function(self) {
         // Set a lock on the sync function so we know
         // that we're in the middle of a sync run
         return  get_sync_time().then(function(time) {
-            return syncEngine.downloadRemoteContent(element_paths,time).then(write_sync_time);
+            return self.syncEngine.downloadRemoteContent(element_paths,time).then(function() {
+                write_sync_time(time);
+            });
         }).then(function(contents) {
             return Promise.all(contents.map(function(content) {
                 return resolve_latest_data(content);
@@ -195,7 +199,7 @@ var worker_function = function(self) {
                         return true;
                     }
                     var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'modified' : new Date(), 'source' : 'remote' };
-                    return syncEngine.sendData(send_block).then(function(patched_data) {
+                    return self.syncEngine.sendData(send_block).then(function(patched_data) {
                         return resolve_latest_data(send_block);
                     });
                 }));
@@ -394,15 +398,15 @@ var worker_function = function(self) {
         return local_db.then(function(db) {
             var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
             return store_get( store, "synctime" ).then(function(synctime) {
-                return synctime ? synctime.time : new Date(0,0,0);
+                return synctime ? synctime : { 'time' : new Date(0,0,0) };
             });
         });
     };
 
-    var write_sync_time = function() {
+    var write_sync_time = function(time) {
         return local_db.then(function(db) {
             var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
-            return store_put( store, "synctime", {'time' : new Date(), 'synctime' : 'synctime' } );
+            return store_put( store, "synctime", {'time' : time.time, 'synctime' : 'synctime' } );
         });
     };
 
@@ -454,7 +458,7 @@ var onenoteEngine = function onenoteEngine(env) {
 
     const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
-    const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime&filter=lastModifiedTime gt <TIME>";
+    const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime,createdTime&orderby=lastModifiedTime desc&filter=lastModifiedTime gt <TIME>";
     const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
 
     var engine = function() {
@@ -479,8 +483,8 @@ var onenoteEngine = function onenoteEngine(env) {
         }
         return env.do_api_call(list_updated_pages_url,env.token,false, {"TIME" : last_sync.toISOString() }).then(function(data) {
             var current_keys = Object.keys(element_paths);
-            var new_pages = data.value.filter(function(page) { return current_keys.indexOf(page.id) >= 0; });
-            return new_pages;
+            data.value.forEach(function(page) { page.wanted = current_keys.indexOf(page.id) >= 0; });
+            return data.value;
         });
     };
 
@@ -525,7 +529,28 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     engine.downloadRemoteContent = function(element_paths,last_sync) {
-        return get_updated_pages(element_paths,last_sync).then(get_page_contents).then(function(contents) {
+        var updated_pages = null;
+        if  (! env.token ) {
+            throw new Error("No AUTH token");
+        }
+        if ( last_sync.time.getTime() === (new Date(0,0,0)).getTime() ) {
+            updated_pages = Promise.resolve( Object.keys(element_paths).map(function(page_id) {
+                return { 'id' : page_id, 'wanted' : true, 'lastModifiedTime' : (new Date(new Date() - 24*60*60*1000 )) };
+            }));
+        } else {
+            updated_pages = get_updated_pages(element_paths,last_sync.time);
+        }
+        return updated_pages.then(function(page_ids) {
+            var max_date;
+            if (page_ids.length > 0) {
+                max_date = new Date(page_ids[0].lastModifiedTime);
+            }
+            if (max_date) {
+                last_sync.time = max_date;
+            }
+
+            return page_ids.filter(function(page) { return page.wanted; });
+        }).then(get_page_contents).then(function(contents) {
             return(extract_contents(element_paths,contents));
         });
     };
