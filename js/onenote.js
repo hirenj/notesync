@@ -95,6 +95,12 @@ var worker_function = function(self) {
 
             return document_id;
         },
+        'create_table' : function(document_id,table) {
+            var element_id = 'table-'+(new Date()).getTime();
+            methods['watch_element'](document_id,element_id);
+            methods['set_values'](document_id,element_id,JSON.stringify(table)).then(synchronise_documents);
+            return element_id;
+        },
         'get_values' : function(document_id,element_id) {
             // Return the elements for the
             // given container identifier
@@ -108,6 +114,7 @@ var worker_function = function(self) {
                                           'element_id' : element_id,
                                           'source' : 'local',
                                           'modified' : new Date() ,
+                                          'new' : extracted[document_id][element_id] ? false : true,
                                           'value' : values
                                       }).then(function() {
                                         extracted[document_id][element_id] = values;
@@ -174,14 +181,15 @@ var worker_function = function(self) {
 
     var synchronise_documents = function() {
         if (Object.keys(element_paths).length < 1) {
-            return;
+            return Promise.resolve(true);
         }
 
         // Set a lock on the sync function so we know
         // that we're in the middle of a sync run
         return  get_sync_time().then(function(time) {
-            return self.syncEngine.downloadRemoteContent(element_paths,time).then(function() {
+            return self.syncEngine.downloadRemoteContent(element_paths,time).then(function(contents) {
                 write_sync_time(time);
+                return contents;
             });
         }).then(function(contents) {
             return Promise.all(contents.map(function(content) {
@@ -198,7 +206,7 @@ var worker_function = function(self) {
                     if ( ! data ) {
                         return true;
                     }
-                    var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'modified' : new Date(), 'source' : 'remote' };
+                    var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'modified' : new Date(), 'new' : data.new, 'source' : 'remote' };
                     return self.syncEngine.sendData(send_block).then(function(patched_data) {
                         return resolve_latest_data(send_block);
                     });
@@ -245,6 +253,9 @@ var worker_function = function(self) {
             // by checking the values of all the local changes
 
             return loop_cursor(store,data,function(cursor) {
+                if ( ! cursor.value.parent ) {
+                    return true;
+                }
                 if (cursor.value.source !== 'local') {
                     return true;
                 }
@@ -294,6 +305,7 @@ var worker_function = function(self) {
     };
 
     var store_local_data = function(db,data) {
+        console.log("Storing local data",data);
         return loop_cursor(db,data,function(cursor) {
             if (cursor.value.source === 'local') {
                 cursor.source.objectStore.delete(cursor.primaryKey);
@@ -412,6 +424,7 @@ var worker_function = function(self) {
 
 
     var do_api_call = function(url,token,xml,params) {
+        var method = 'GET';
         if (params) {
             Object.keys(params).forEach(function(par) {
                 // CSRF risk point here
@@ -419,17 +432,27 @@ var worker_function = function(self) {
                     url = url.replace("<"+par+">",params[par]);
                 }
             });
+            if (params.method) {
+                method = params.method;
+            }
         }
         return new Promise(function(resolve,reject) {
             var xhr = new XMLHttpRequest();
             xhr.addEventListener("load", function(ev) {
-                resolve(xml ? tXml(ev.srcElement.responseText) : JSON.parse(ev.srcElement.responseText));
+                resolve(xml ? tXml(ev.srcElement.responseText) : JSON.parse(ev.srcElement.responseText || "{}") );
             }, false);
             xhr.addEventListener("error", reject, false);
             xhr.addEventListener("abort", reject, false);
-            xhr.open('GET',url);
+            xhr.open(method,url);
+            if (params && params.content_type) {
+                xhr.setRequestHeader('Content-Type',params.content_type);
+            }
             xhr.setRequestHeader('Authorization', 'Bearer ' + token);
-            xhr.send();
+            if (params && params.data) {
+                xhr.send(params.data);
+            } else {
+                xhr.send();
+            }
         });
     };
 
@@ -460,6 +483,7 @@ var onenoteEngine = function onenoteEngine(env) {
     const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime,createdTime&orderby=lastModifiedTime desc&filter=lastModifiedTime gt <TIME>";
     const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
+    const patch_page_url = "https://www.onenote.com/api/beta/pages/<ID>/content";
 
     var engine = function() {
     };
@@ -488,6 +512,15 @@ var onenoteEngine = function onenoteEngine(env) {
         });
     };
 
+    var patch_page = function(page_id,change_block) {
+        return env.do_api_call(patch_page_url,env.token,false, {
+            'ID' : page_id,
+            'method' : 'PATCH',
+            'content_type' : 'application/json',
+            'data' : JSON.stringify(change_block)
+        });
+    };
+
     var get_page_contents = function(page_ids) {
 
         if ( ! env.token ) {
@@ -509,8 +542,39 @@ var onenoteEngine = function onenoteEngine(env) {
 
     };
 
+    var children_search = function(root,element_id) {
+        console.log(root);
+        console.log(element_id);
+        if (root.attributes && root.attributes['data-id'] && root.attributes['data-id'] === element_id) {
+            console.log("Returning");
+            return root;
+        }
+        var kids = root.children || [];
+        console.log("Looping through children ",kids);
+        var target = null;
+        while (target === null && kids.length > 0) {
+            target = children_search(kids.shift(),element_id);
+        }
+        return target;
+    };
+
+    var convert_header = function(header_row) {
+        debugger;
+    };
+
+    var convert_table = function(table) {
+        var rows = table.children;
+        var header = rows.shift();
+        var fields = convert_header(header);
+        rows.map(function(row) { return convert_row(fields,row) });
+    };
+
     var extract_content = function(content, element_id) {
-        return content.attributes;
+        var target = children_search(content.children[1],element_id);
+
+        if (target) {
+            return convert_table(target);
+        }
     };
 
     var extract_contents = function(element_paths,contents) {
@@ -527,6 +591,21 @@ var onenoteEngine = function onenoteEngine(env) {
         return values;
 
     };
+
+    var write_content = function(id,rows) {
+        var column_names = [];
+        if (rows.length > 0) {
+            column_names = Object.keys(rows[0]);
+        }
+        var header = '<tr>'+column_names.map(function(col) { return '<td><b>'+col+'</b></td>' }).join('')+'</tr>';
+        var row_data = rows.map( function(row) {
+            return '<tr>'+column_names.map(function(col) {
+                return '<td>'+row[col]+'</td>';
+            }).join('')+'</tr>';
+        }).join('');
+        return '<table border="2" data-id="'+id+'">'+header+row_data+'</table>';
+    };
+
 
     engine.downloadRemoteContent = function(element_paths,last_sync) {
         var updated_pages = null;
@@ -557,11 +636,24 @@ var onenoteEngine = function onenoteEngine(env) {
 
     engine.sendData = function(data) {
         console.log("Sending data",data);
-        // do_api_call write_content(data.value)
-        data.value = JSON.stringify(data.value);
-        data.source = 'remote';
-        data.modified = new Date();
-        return new Promise(data);
+        var send_block = [ {
+            'target':'body',
+            'action':'append',
+            'position':'before',
+            'content': write_content(data.element_id,JSON.parse(data.value))
+        }];
+
+        if (! data.new) {
+            send_block[0].target = '#'+data.element_id;
+            send_block[0].action = 'replace';
+        }
+
+        return patch_page(data.page_id,send_block).then(function() {
+            data.value = JSON.stringify(data.value);
+            data.source = 'remote';
+            data.modified = new Date();
+            return data;
+        });
     };
 
     engine.registerMethods();
@@ -643,6 +735,13 @@ if ("Worker" in window && window.location.hash === '') {
 
         OneNoteSync.prototype.watchElement = function(doc,element) {
             return worker_method('watch_element', [ doc, element ]);
+        };
+
+        OneNoteSync.prototype.appendTable = function(doc,table) {
+            if ( ! table ) {
+                table = [];
+            }
+            return worker_method('create_table', [doc, table]);
         };
 
         OneNoteSync.prototype.sync = function() {
