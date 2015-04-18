@@ -98,7 +98,7 @@ var worker_function = function(self) {
         'create_table' : function(document_id,table) {
             var element_id = 'table-'+(new Date()).getTime();
             methods['watch_element'](document_id,element_id);
-            methods['set_values'](document_id,element_id,JSON.stringify(table)).then(synchronise_documents);
+            methods['set_values'](document_id,element_id,table).then(synchronise_documents);
             return element_id;
         },
         'get_values' : function(document_id,element_id) {
@@ -115,9 +115,9 @@ var worker_function = function(self) {
                                           'source' : 'local',
                                           'modified' : new Date() ,
                                           'new' : extracted[document_id][element_id] ? false : true,
-                                          'value' : values
+                                          'value' : JSON.stringify(values)
                                       }).then(function() {
-                                        extracted[document_id][element_id] = values;
+                                        extracted[document_id][element_id] = JSON.stringify(values);
                                       });
         },
         'set_oauth_token' : function(token) {
@@ -141,6 +141,7 @@ var worker_function = function(self) {
         Object.keys(extracted).forEach(function(page_id) {
             ids_to_watch = ids_to_watch.concat(Object.keys(extracted[page_id]).map(function(el_id) {  return [page_id,el_id]; }));
         });
+        // get_latest_data returns the database entries with stringified values
         Promise.all( ids_to_watch.map( function(ids) { return get_latest_data(ids[0],ids[1]); } ) ).then(
         function(vals) {
             vals.forEach(function(val) {
@@ -206,6 +207,7 @@ var worker_function = function(self) {
                     if ( ! data ) {
                         return true;
                     }
+                    // data.value should be a string
                     var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'modified' : new Date(), 'new' : data.new, 'source' : 'remote' };
                     return self.syncEngine.sendData(send_block).then(function(patched_data) {
                         return resolve_latest_data(send_block);
@@ -216,6 +218,9 @@ var worker_function = function(self) {
     };
 
     var store_remote_data = function(db,data) {
+        if ( ! data.value ) {
+            debugger;
+        }
         var previous_remote = null;
         var previous_remote_value = null;
 
@@ -254,6 +259,9 @@ var worker_function = function(self) {
 
             return loop_cursor(store,data,function(cursor) {
                 if ( ! cursor.value.parent ) {
+                    if (cursor.value.new && cursor.value.value === data.value ) {
+                        store.delete(cursor.primaryKey);
+                    }
                     return true;
                 }
                 if (cursor.value.source !== 'local') {
@@ -543,14 +551,10 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     var children_search = function(root,element_id) {
-        console.log(root);
-        console.log(element_id);
         if (root.attributes && root.attributes['data-id'] && root.attributes['data-id'] === element_id) {
-            console.log("Returning");
             return root;
         }
         var kids = root.children || [];
-        console.log("Looping through children ",kids);
         var target = null;
         while (target === null && kids.length > 0) {
             target = children_search(kids.shift(),element_id);
@@ -559,21 +563,32 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     var convert_header = function(header_row) {
-        debugger;
+        return header_row.children.map(function(td) { return td.children[0].children[0]; });
     };
+
+    var convert_row = function(fields,row) {
+        var vals = row.children.map(function(td) { return td.children[0]; }).reverse();
+        var data = {};
+        fields.reverse().forEach(function(field) {
+            data[field] = vals.shift();
+        });
+        return data;
+    };
+
 
     var convert_table = function(table) {
         var rows = table.children;
         var header = rows.shift();
         var fields = convert_header(header);
-        rows.map(function(row) { return convert_row(fields,row) });
+        return rows.map(function(row) { return convert_row(fields,row) });
     };
 
     var extract_content = function(content, element_id) {
         var target = children_search(content.children[1],element_id);
-
         if (target) {
-            return convert_table(target);
+            var converted = convert_table(target);
+            console.log("Converted ",converted);
+            return converted;
         }
     };
 
@@ -635,6 +650,9 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     engine.sendData = function(data) {
+        // data.value should be a string, because it's the
+        // database format object
+
         console.log("Sending data",data);
         var send_block = [ {
             'target':'body',
@@ -647,9 +665,10 @@ var onenoteEngine = function onenoteEngine(env) {
             send_block[0].target = '#'+data.element_id;
             send_block[0].action = 'replace';
         }
-
         return patch_page(data.page_id,send_block).then(function() {
-            data.value = JSON.stringify(data.value);
+
+            // data.value here should be a string
+
             data.source = 'remote';
             data.modified = new Date();
             return data;
