@@ -176,7 +176,10 @@ var worker_function = function(self) {
 
     var lock_and_synchronise = function() {
         return obtain_lock().then(function() {
-            return synchronise_documents().catch(function() { return Promise.resolve(true); });
+            return synchronise_documents().catch(function(error) {
+                // FIXME - do something with the error here
+                return Promise.resolve(true);
+            });
         }).then(release_lock);
     };
 
@@ -218,9 +221,6 @@ var worker_function = function(self) {
     };
 
     var store_remote_data = function(db,data) {
-        if ( ! data.value ) {
-            debugger;
-        }
         var previous_remote = null;
         var previous_remote_value = null;
 
@@ -554,7 +554,7 @@ var onenoteEngine = function onenoteEngine(env) {
         if (root.attributes && root.attributes['data-id'] && root.attributes['data-id'] === element_id) {
             return root;
         }
-        var kids = root.children || [];
+        var kids = [].concat(root.children || []);
         var target = null;
         while (target === null && kids.length > 0) {
             target = children_search(kids.shift(),element_id);
@@ -566,11 +566,38 @@ var onenoteEngine = function onenoteEngine(env) {
         return header_row.children.map(function(td) { return td.children[0].children[0]; });
     };
 
+    var extract_tag = function(span,data,field) {
+        (span.attributes['data-tag'] || '').split(',').forEach(function(attr) {
+            if (attr === 'to-do') {
+                data[field+':checked'] = false;
+                return;
+            }
+            if (attr === 'to-do:completed') {
+                data[field+':checked'] = true;
+                return;
+            }
+            data[field+':'+attr] = true;
+        });
+        return span.children[0];
+    }
+
     var convert_row = function(fields,row) {
         var vals = row.children.map(function(td) { return td.children[0]; }).reverse();
         var data = {};
-        fields.reverse().forEach(function(field) {
-            data[field] = vals.shift();
+        var curr_idx = row.children.length - 1;
+        [].concat(fields).reverse().forEach(function(field) {
+            var val = vals.shift();
+            if (typeof val === 'object') {
+                data[field] = extract_tag(val,data,field);
+            } else {
+                data[field] = val;
+            }
+            var color = (row.children[curr_idx].attributes['style'] || "").match(/background-color:([^;]+)/) || [];
+            if (color[1]) {
+                data[field+':color'] = color[1];
+            }
+
+            curr_idx -= 1;
         });
         return data;
     };
@@ -607,16 +634,60 @@ var onenoteEngine = function onenoteEngine(env) {
 
     };
 
+    var collect_keys = function(rows) {
+        var keys = {};
+        rows.forEach(function(row) {
+            Object.keys(row).forEach(function(key) {
+                if ( key.indexOf(':') < 0) {
+                    keys[key] = true;
+                }
+            });
+        });
+        return Object.keys(keys).sort();
+    };
+
+    var write_cell = function(data) {
+        var style = "";
+        var tags = [];
+        if (data.color) {
+            style = ' style="background-color:'+data.color+'"';
+        }
+        if ("checked" in data) {
+            if (data.checked) {
+                tags.push('to-do:completed');
+            } else {
+                tags.push('to-do');
+            }
+        }
+        tags = tags.concat( Object.keys(data).filter(function(tag) { return ! (tag.indexOf('to-do') > 0 || tag == 'value' || tag == 'color' || tag == 'checked');  }) );
+        var span_start = "", span_end = "";
+        if (tags.length > 0) {
+            span_start = '<span data-tag="'+tags.join(',')+'">';
+            span_end = '</span>';
+        }
+        return "<td"+style+">"+span_start+data.value+span_end+"</td>";
+    };
+
+    var write_row = function(row,column_names) {
+        var row_keys = Object.keys(row);
+        return column_names.map(function(col) {
+            var data = {};
+            row_keys.filter(function(key) {  return key.indexOf(col+":") >= 0; }).forEach(function(key) {
+                data[ key.replace(col+":","") ] = row[key];
+            });
+            data.value = row[col];
+            return write_cell(data);
+        }).join('');
+    };
+
     var write_content = function(id,rows) {
         var column_names = [];
         if (rows.length > 0) {
-            column_names = Object.keys(rows[0]);
+            column_names = collect_keys(rows);
         }
         var header = '<tr>'+column_names.map(function(col) { return '<td><b>'+col+'</b></td>' }).join('')+'</tr>';
         var row_data = rows.map( function(row) {
-            return '<tr>'+column_names.map(function(col) {
-                return '<td>'+row[col]+'</td>';
-            }).join('')+'</tr>';
+            return '<tr>'+write_row(row,column_names)+'</tr>';
         }).join('');
         return '<table border="2" data-id="'+id+'">'+header+row_data+'</table>';
     };
