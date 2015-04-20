@@ -753,29 +753,38 @@ var onenoteEngine = function onenoteEngine(env) {
 
 if ("Worker" in window && window.location.hash === '') {
     window.OneNoteSync = (function() {
-        console.log("Defining worker");
-        var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
-        common_worker.postMessage();
-        common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()], {'type' : 'text/javascript'})) });
-        common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([onenoteEngine.toString()+"\nonenoteEngine(this); syncEngine = OneNoteSyncEngine;"], {'type' : 'text/javascript'})) });
-        WL.init({
-            client_id: '000000004C14DD4A',
-            redirect_uri: 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html',
-            scope: "office.onenote_update",
-            response_type: "token"
-        }).then(function() {
-            console.log("Inited OneNote library");
-        },function(err) {
-            console.log(err);
-        });
 
-        common_worker.addEventListener('message',function(e) {
-            if (e.data) {
-                if (e.data.event) {
-                    console.log("Received event",e.data);
+        var worker = Promise.reject(true);
+        var define_worker = function() {
+            worker = new Promise(function(resolve) {
+                console.log("Defining worker");
+                var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
+                common_worker.postMessage();
+                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([onenoteEngine.toString()+"\nonenoteEngine(this); syncEngine = OneNoteSyncEngine;"], {'type' : 'text/javascript'})) });
+                if ( window.WL ) {
+
+                    WL.init({
+                        client_id: '000000004C14DD4A',
+                        redirect_uri: 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html',
+                        scope: "office.onenote_update",
+                        response_type: "token"
+                    }).then(function() {
+                        console.log("Inited OneNote library");
+                    },function(err) {
+                        console.log(err);
+                    });
                 }
-            }
-        });
+                common_worker.addEventListener('message',function(e) {
+                    if (e.data) {
+                        if (e.data.event) {
+                            console.log("Received event",e.data);
+                        }
+                    }
+                });
+                resolve(common_worker);
+            });
+        };
 
 
         var worker_method = function(method,args) {
@@ -794,25 +803,30 @@ if ("Worker" in window && window.location.hash === '') {
                     }
                 };
 
-                common_worker.addEventListener('message',receive_func);
+                worker.then(function(worker) {
+                    worker.addEventListener('message',receive_func);
+                    worker.postMessage(message_block);
+                    setTimeout(function() {
+                        worker.removeEventListener('message',receive_func);
+                        reject({"error" : "Timeout"});
+                    },60000);
+                });
 
-                common_worker.postMessage(message_block);
-
-                setTimeout(function() {
-                    common_worker.removeEventListener('message',receive_func);
-                    reject({"error" : "Timeout"});
-                },10000);
             });
-        }
+        };
 
         var OneNoteSync = function() {
-            WL.login().then(function(response) {
-                worker_method('set_oauth_token', [ response.session.access_token ] ).then(function(ok) {
-                    console.log(ok);
+            worker.catch(define_worker);
+
+            if (window.WL) {
+                WL.login().then(function(response) {
+                    worker_method('set_oauth_token', [ response.session.access_token ] ).then(function(ok) {
+                        console.log(ok);
+                    });
+                },function(err) {
+                    console.log(err);
                 });
-            },function(err) {
-                console.log(err);
-            });
+            }
         };
 
         OneNoteSync.prototype.listNotebooks = function() {
