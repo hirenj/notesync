@@ -2,7 +2,7 @@ var worker_function = function(self) {
     "use strict";
 
     var local_db = new Promise(function(resolve,reject){
-        var request = indexedDB.open("onenote",3);
+        var request = self.indexedDB.open("onenote",3);
         var db = null;
         request.onerror = function(event){
             reject();
@@ -22,10 +22,14 @@ var worker_function = function(self) {
             // Allow us to search by last modified (so we can get the latest data quickly)
             objectStore.createIndex("by_modified",["element_id","page_id","modified"],{unique:false});
             objectStore.createIndex("by_elements",["element_id","page_id"], {unique: false});
-            objectStore.transaction.oncomplete = function (){
-                console.log("Done version change");
+            if (objectStore.transaction) {
+                objectStore.transaction.oncomplete = function (){
+                    console.log("Done version change");
+                    resolve(db);
+                };
+            } else {
                 resolve(db);
-            };
+            }
         };
 
         request.onsuccess = function(event) {
@@ -78,6 +82,9 @@ var worker_function = function(self) {
     };
 
     var methods = {
+        'is_ready' : function() {
+            return local_db.then(function() { return true; });
+        },
         'add_document' : function(document_id) {
             if ( ! element_paths[document_id]) {
                 element_paths[document_id] = [];
@@ -151,7 +158,7 @@ var worker_function = function(self) {
                 if (extracted[val.page_id][val.element_id] != val.value) {
                     console.log("Changed value for ",val.page_id,val.element_id,"from",extracted[val.page_id][val.element_id], JSON.parse(val.value) );
                     extracted[val.page_id][val.element_id] = val.value;
-                    postMessage({"event" : "change", "element_id" : val.element_id, "page_id" : val.page_id, "value" : JSON.parse(val.value) });
+                    self.postMessage({"event" : "change", "element_id" : val.element_id, "page_id" : val.page_id, "value" : JSON.parse(val.value) });
                 }
             });
         });
@@ -445,9 +452,9 @@ var worker_function = function(self) {
             }
         }
         return new Promise(function(resolve,reject) {
-            var xhr = new XMLHttpRequest();
+            var xhr = new (self.XMLHttpRequest)();
             xhr.addEventListener("load", function(ev) {
-                resolve(xml ? tXml(ev.srcElement.responseText) : JSON.parse(ev.srcElement.responseText || "{}") );
+                resolve(xml ? self.tXml(ev.srcElement.responseText) : JSON.parse(ev.srcElement.responseText || "{}") );
             }, false);
             xhr.addEventListener("error", reject, false);
             xhr.addEventListener("abort", reject, false);
@@ -474,11 +481,13 @@ var worker_function = function(self) {
     self.addEventListener('message', function(e) {
         if (e.data) {
             if (e.data.import_script) {
-                importScripts(e.data.import_script);
+                self.importScripts(e.data.import_script);
                 return;
             }
             Promise.resolve(methods[e.data.method].apply(null,e.data.arguments)).then(function(val) {
-                postMessage( { 'method' : e.data.method, 'message_id' : e.data.message_id, 'value' : val }  );
+                self.postMessage( { 'method' : e.data.method, 'message_id' : e.data.message_id, 'value' : val }  );
+            },function(err) {
+                self.postMessage( { 'method' : e.data.method, 'message_id' : e.data.message_id, 'error' : err }  );
             });
         }
     }, false);
@@ -747,8 +756,7 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     engine.registerMethods();
-
-    self.OneNoteSyncEngine = engine;
+    env.OneNoteSyncEngine = engine;
 };
 
 if ("Worker" in window && window.location.hash === '') {
@@ -760,8 +768,8 @@ if ("Worker" in window && window.location.hash === '') {
                 console.log("Defining worker");
                 var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
                 common_worker.postMessage();
-                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()], {'type' : 'text/javascript'})) });
-                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([onenoteEngine.toString()+"\nonenoteEngine(this); syncEngine = OneNoteSyncEngine;"], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()+"\nself.tXml = tXml;"], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([onenoteEngine.toString()+"\nonenoteEngine(self); self.syncEngine = self.OneNoteSyncEngine;"], {'type' : 'text/javascript'})) });
                 if ( window.WL ) {
 
                     WL.init({
@@ -797,9 +805,12 @@ if ("Worker" in window && window.location.hash === '') {
                 var receive_func = function(e) {
                     if (e.data) {
                         if (e.data.message_id === message_block.message_id) {
-                            resolve(e.data.value);
+                            if (e.data.error) {
+                                reject(e.data.error);
+                            } else {
+                                resolve(e.data.value);
+                            }
                         }
-                        // We should handle the error cases in here too.
                     }
                 };
 
@@ -816,17 +827,9 @@ if ("Worker" in window && window.location.hash === '') {
         };
 
         var OneNoteSync = function() {
-            worker.catch(define_worker);
-
-            if (window.WL) {
-                WL.login().then(function(response) {
-                    worker_method('set_oauth_token', [ response.session.access_token ] ).then(function(ok) {
-                        console.log(ok);
-                    });
-                },function(err) {
-                    console.log(err);
-                });
-            }
+            this.ready = worker.catch(define_worker).then(function() {
+                return worker_method('is_ready');
+            });
         };
 
         OneNoteSync.prototype.listNotebooks = function() {
@@ -850,6 +853,9 @@ if ("Worker" in window && window.location.hash === '') {
 
         OneNoteSync.prototype.sync = function() {
             return worker_method('sync');
+        };
+        OneNoteSync.prototype.setToken = function(token) {
+            return worker_method('set_oauth_token', [ token ] );
         };
         return OneNoteSync;
     })();

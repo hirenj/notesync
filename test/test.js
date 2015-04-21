@@ -1,12 +1,12 @@
 QUnit.module("Database checks",{ 
     beforeEach: function() {
-        if ( ! window.orig_db ) {
-            window.orig_db = window.indexedDB;
-        }
-        window.indexedDB = mockIndexedDB;
+        window.Worker = MockWorker;
+        window.Worker.indexedDB = mockIndexedDB;
+        resetIndexedDBMock();
+        mockIndexedDBTestFlags.upgradeNeeded = true;
     },
     afterEach: function() {
-        window.indexedDB = window.orig_db;
+        window.Worker.indexedDB = window.indexedDB;
     }
 });
 QUnit.test( "Test sync class defined", function( assert ) {
@@ -16,7 +16,16 @@ QUnit.test( "Test indexeddb is mocked", function( assert ) {
     assert.ok(typeof window.indexedDB === 'object','Passed!');
 });
 QUnit.test( "Test kick off of worker", function( assert ) {
-    assert.ok(new OneNoteSync() !== null, 'Passed!');
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        assert.ok(onenote !== null, 'Passed!');
+        assert.ok(mockIndexedDB_createStoreSuccess, 'Object store creation');
+        done();
+    }).catch(function(err) {
+        assert.ok(false,err);
+        done();
+    });
 });
 
 QUnit.module("Regular database check");

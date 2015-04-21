@@ -9,6 +9,22 @@
 
 
 <!-- Test page: 0-017c0740ce6b874d95db2107873d4b4c!1-44C1F944A8043289!252 , Table id: table-1429347457782 -->
-<div onclick="window.onenoter = new OneNoteSync();">Click me</div>
+<div onclick="setOneNote();">Click me 1</div>
+<div onclick="doLogin();">Click me 2</div>
+
+<script>
+function setOneNote() {
+	window.onenoter = new OneNoteSync();
+};
+function doLogin() {
+    WL.login().then(function(response) {
+        onenoter.setToken(response.session.access_token).then(function(ok) {
+            console.log(ok);
+        });
+    },function(err) {
+        console.log(err);
+    });
+};
+</script>
 </body>
 </html>

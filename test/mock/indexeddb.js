@@ -350,7 +350,8 @@ var mockIndexedDBStore = {
 		}
 
 		return mockIndexedDBCursorRequest;
-	}
+	},
+	'onsuccess' : null
 };
 
 var mockIndexedDBTransaction = {
