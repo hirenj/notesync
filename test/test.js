@@ -15,18 +15,23 @@ QUnit.test( "Test sync class defined", function( assert ) {
 QUnit.test( "Test indexeddb is mocked", function( assert ) {
     assert.ok(typeof window.indexedDB === 'object','Passed!');
 });
-QUnit.test( "Test kick off of worker", function( assert ) {
+QUnit.test( "Test kick off of worker", null,function( assert ) {
     var done = assert.async();
+    console.log("Setting up spy");
+    var spy = this.spy(mockIndexedDBDatabase, "createObjectStore");
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         assert.ok(onenote !== null, 'Passed!');
+        console.log("Created store ",mockIndexedDB_createStoreSuccess);
         assert.ok(mockIndexedDB_createStoreSuccess, 'Object store creation');
+        console.log(spy === mockIndexedDBDatabase.createObjectStore);
+        console.log(spy.callCount);
         done();
     }).catch(function(err) {
         assert.ok(false,err);
         done();
     });
-});
+},true);
 
 QUnit.module("Regular database check");
 
