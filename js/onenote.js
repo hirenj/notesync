@@ -671,8 +671,8 @@ var onenoteEngine = function onenoteEngine(env) {
         tags = tags.concat( Object.keys(data).filter(function(tag) { return ! (tag.indexOf('to-do') > 0 || tag == 'value' || tag == 'color' || tag == 'checked');  }) );
         var span_start = "", span_end = "";
         if (tags.length > 0) {
-            span_start = '<span data-tag="'+tags.join(',')+'">';
-            span_end = '</span>';
+            span_start = '<p data-tag="'+tags.join(',')+'">';
+            span_end = '</p>';
         }
         return "<td"+style+">"+span_start+data.value+span_end+"</td>";
     };
@@ -842,6 +842,10 @@ if ("Worker" in window && window.location.hash === '') {
 
         OneNoteSync.prototype.watchElement = function(doc,element) {
             return worker_method('watch_element', [ doc, element ]);
+        };
+
+        OneNoteSync.prototype.setValues = function(doc,element,values) {
+            return worker_method('set_values', [doc, element, values]);
         };
 
         OneNoteSync.prototype.appendTable = function(doc,table) {
