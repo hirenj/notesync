@@ -5540,6 +5540,7 @@ if (typeof sinon == "undefined") {
                 var args = slice.call(arguments);
                 var oldDone = args.length && args[args.length - 1];
                 var exception, result;
+
                 if (typeof oldDone == "function") {
                     args[args.length - 1] = function sinonDone(result) {
                         if (result) {
@@ -5556,22 +5557,6 @@ if (typeof sinon == "undefined") {
                     result = callback.apply(this, args.concat(sandbox.args));
                 } catch (e) {
                     exception = e;
-                }
-                if (args[0].test.usedAsync) {
-                  setTimeout(function() {
-                    if (args[0].test.semaphore > 0) {
-                      setTimeout(arguments.callee,100);
-                    }
-                    if (typeof oldDone != "function") {
-                        if (typeof exception !== "undefined") {
-                            sandbox.restore();
-                            throw exception;
-                        } else {
-                            sandbox.verifyAndRestore();
-                        }
-                    }
-                  },100);
-                  return;
                 }
 
                 if (typeof oldDone != "function") {

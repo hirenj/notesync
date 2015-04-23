@@ -1,5 +1,6 @@
 QUnit.module("Database checks",{ 
     beforeEach: function() {
+        window.originalWorker = window.Worker;
         window.Worker = MockWorker;
         window.Worker.indexedDB = mockIndexedDB;
         resetIndexedDBMock();
@@ -7,36 +8,69 @@ QUnit.module("Database checks",{
     },
     afterEach: function() {
         window.Worker.indexedDB = window.indexedDB;
+        window.Worker = window.originalWorker;
     }
 });
+
 QUnit.test( "Test sync class defined", function( assert ) {
     assert.ok(typeof OneNoteSync !== 'undefined', "Passed!" );
 });
-QUnit.test( "Test indexeddb is mocked", function( assert ) {
-    assert.ok(typeof window.indexedDB === 'object','Passed!');
-});
-QUnit.test( "Test kick off of worker", null,function( assert ) {
+
+QUnit.test( "Test init of worker and database",function( assert ) {
     var done = assert.async();
-    console.log("Setting up spy");
-    var spy = this.spy(mockIndexedDBDatabase, "createObjectStore");
+    var spy = sinon.spy(mockIndexedDBDatabase, "createObjectStore");
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
-        assert.ok(onenote !== null, 'Passed!');
-        console.log("Created store ",mockIndexedDB_createStoreSuccess);
-        assert.ok(mockIndexedDB_createStoreSuccess, 'Object store creation');
-        console.log(spy === mockIndexedDBDatabase.createObjectStore);
-        console.log(spy.callCount);
+        assert.ok(onenote !== null, 'Have onenote object');
+        assert.ok(JSON.stringify(spy.args) === '[["synclocks"],["syncelements"]]' ,"Created two object stores");
+        onenote.terminate();
         done();
     }).catch(function(err) {
         assert.ok(false,err);
+        assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");
         done();
     });
-},true);
+});
 
-QUnit.module("Regular database check");
+QUnit.module("Testing web worker startup and shutdown", {
+    beforeEach: function() {
+        window.originalWorker = window.Worker;
+        window.Worker = MockWorker;
+        indexedDB.deleteDatabase('onenote');
+    },
+    afterEach: function() {
+        window.Worker = window.originalWorker;
+        indexedDB.deleteDatabase('onenote');
+    }
+});
 
-QUnit.test( "Test indexeddb is mocked", function( assert ) {
-    assert.ok(typeof window.indexedDB === 'object','Passed!');
+QUnit.test( "Test init of worker and database" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        assert.ok(onenote !== null, 'Have onenote object');
+        onenote.terminate();
+        done();
+    }).catch(function(err) {
+        assert.ok(false,err);
+        assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");
+        done();
+    });
+});
+
+
+QUnit.test( "Test shutdown of worker" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        assert.ok(onenote !== null, 'Have onenote object');
+        onenote.terminate();
+        done();
+    }).catch(function(err) {
+        assert.ok(false,err);
+        assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");
+        done();
+    });
 });
 
 
