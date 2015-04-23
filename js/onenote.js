@@ -202,7 +202,10 @@ var worker_function = function(self) {
             });
         }).then(function(contents) {
             return Promise.all(contents.map(function(content) {
-                return resolve_latest_data(content);
+                return resolve_latest_data(content).catch(function(err) {
+                    console.log("Could not resolve data for ",content.id,err);
+                    return null;
+                });
             }));
         }).then(function() {
             var ids_to_check = [];
@@ -216,7 +219,7 @@ var worker_function = function(self) {
                         return true;
                     }
                     // data.value should be a string
-                    var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'modified' : new Date(), 'new' : data.new, 'source' : 'remote' };
+                    var send_block = { 'page_id' : data.page_id, 'element_id' : data.element_id, 'value' : data.value, 'remote_id' : data.remote_id, 'modified' : new Date(), 'new' : data.new, 'source' : 'remote' };
                     return self.syncEngine.sendData(send_block).then(function(patched_data) {
                         return resolve_latest_data(send_block);
                     });
@@ -288,12 +291,18 @@ var worker_function = function(self) {
                         // while also keeping the local changes
 
                         cursor.value.parent = data.modified;
+                        if (data.remote_id) {
+                            cursor.value.remote_id = data.remote_id;
+                        }
                         store.put(cursor.value,cursor.primaryKey);
 
                     } else {
                         // Values are the same, simply update the "parent" value
                         console.log("Updating local",cursor.value, " parent time to be ",data.modified);
                         cursor.value.parent = data.modified;
+                        if (data.remote_id) {
+                            cursor.value.remote_id = data.remote_id;
+                        }
                         store.put(cursor.value,cursor.primaryKey);
                     }
                 } else if (cursor.value.parent.getTime() !== data.modified.getTime() ) {
@@ -325,6 +334,9 @@ var worker_function = function(self) {
             }
             if (cursor.value.source === 'remote' && ! data.parent) {
                 data.parent = cursor.value.modified;
+                if (cursor.value.remote_id) {
+                    data.remote_id = cursor.value.remote_id;
+                }
                 if (cursor.value.value === data.value) {
                     data.synced = true;
                 }
@@ -622,7 +634,7 @@ var onenoteEngine = function onenoteEngine(env) {
         if (target) {
             var converted = convert_table(target);
             console.log("Converted ",converted);
-            return converted;
+            return { "id" : target.attributes['id'], "data" : converted };
         }
     };
 
@@ -633,8 +645,9 @@ var onenoteEngine = function onenoteEngine(env) {
         var values = [];
         contents.forEach(function(content) {
             values = values.concat(element_paths[content.id].map(function(element_id) {
-                var value = JSON.stringify(extract_content( content[0], element_id ));
-                return { 'page_id': content.id, 'element_id': element_id, 'modified' : content.modified, 'source' : 'remote', 'value' : value };
+                var extracted = extract_content( content[0], element_id );
+                var value = JSON.stringify(extracted.data);
+                return { 'page_id': content.id, 'element_id': element_id, 'modified' : content.modified, 'source' : 'remote', 'remote_id' : extracted.id,  'value' : value };
             }));
         });
         return values;
@@ -740,15 +753,22 @@ var onenoteEngine = function onenoteEngine(env) {
         }];
 
         if (! data.new) {
-            send_block[0].target = '#'+data.element_id;
+            send_block[0].target = data.remote_id;
             send_block[0].action = 'replace';
+            if ( ! data.remote_id ) {
+                throw new Error("No remote id to populate");
+            }
         }
+
         return patch_page(data.page_id,send_block).then(function() {
 
             // data.value here should be a string
 
             data.source = 'remote';
             data.modified = new Date();
+            if ("remote_id" in data) {
+                delete data['remote_id'];
+            }
             return data;
         });
     };
@@ -762,7 +782,7 @@ if ("Worker" in window && window.location.hash === '') {
 
         var worker = Promise.reject(true);
         var define_worker = function() {
-            worker = new Promise(function(resolve) {
+            worker = new Promise(function(resolve,reject) {
                 console.log("Defining worker");
                 var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
                 common_worker.postMessage();
@@ -812,7 +832,7 @@ if ("Worker" in window && window.location.hash === '') {
                     }
                 };
 
-                worker.then(function(worker) {
+                worker.catch(define_worker).then(function(worker) {
                     worker.addEventListener('message',receive_func);
                     worker.postMessage(message_block);
                     setTimeout(function() {
@@ -858,6 +878,13 @@ if ("Worker" in window && window.location.hash === '') {
         };
         OneNoteSync.prototype.setToken = function(token) {
             return worker_method('set_oauth_token', [ token ] );
+        };
+
+        OneNoteSync.prototype.terminate = function() {
+            worker.then(function(common_worker) {
+                common_worker.terminate();
+            });
+            worker = Promise.reject(false);
         };
         return OneNoteSync;
     })();
