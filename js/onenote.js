@@ -250,7 +250,10 @@ var worker_function = function(self) {
                 // simply stop adding this remote value in.
 
                 if (cursor.value.modified.getTime() > data.modified.getTime()) {
-                    throw new Error("Out of order remote value (have newer remote value)");
+                    var err = new Error("Out of order remote value (have newer remote value)");
+                    err.curr_value = cursor.value.modified;
+                    err.new_value = data.modified;
+                    throw err;
                 }
 
                 previous_remote = cursor.value.modified;
@@ -509,6 +512,7 @@ var onenoteEngine = function onenoteEngine(env) {
     const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
     const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime,createdTime&orderby=lastModifiedTime desc&filter=lastModifiedTime gt <TIME>";
+    const get_page_last_modified_url = "https://www.onenote.com/api/beta/pages/<ID>?select=id,title,lastModifiedTime,createdTime";
     const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
     const patch_page_url = "https://www.onenote.com/api/beta/pages/<ID>/content";
 
@@ -529,6 +533,29 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     var get_updated_pages = function(element_paths,last_sync) {
+        return get_updated_pages_by_polling(element_paths,last_sync);
+    };
+
+    var get_updated_pages_by_polling = function(element_paths,last_sync) {
+        if ( ! env.token ) {
+            throw new Error("No AUTH token");
+        }
+        var current_keys = Object.keys(element_paths);
+        var modified_time_promises = current_keys.map(function(page_id) {
+            return env.do_api_call(get_page_last_modified_url,env.token,false, { "ID" : page_id }).then(function(data) {
+                return data;
+            });
+        });
+        return Promise.all( modified_time_promises ).then(function( page_metas ) {
+            return page_metas.filter(function(page) {
+                return last_sync.getTime() < (new Date(page.lastModifiedTime)).getTime();
+            });
+        });
+    };
+
+
+
+    var get_updated_pages_by_synctime = function(element_paths,last_sync) {
         if ( ! env.token ) {
             throw new Error("No AUTH token");
         }
