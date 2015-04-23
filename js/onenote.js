@@ -15,7 +15,6 @@ var worker_function = function(self) {
             if (db.objectStoreNames.contains('synclocks')) {
                 db.deleteObjectStore('synclocks');
             }
-
             db.createObjectStore('synclocks');
 
             var objectStore = db.createObjectStore("syncelements");
@@ -24,7 +23,6 @@ var worker_function = function(self) {
             objectStore.createIndex("by_elements",["element_id","page_id"], {unique: false});
             if (objectStore.transaction) {
                 objectStore.transaction.oncomplete = function (){
-                    console.log("Done version change");
                     resolve(db);
                 };
             } else {
