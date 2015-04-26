@@ -13,7 +13,9 @@ var dataURLToBlob = function(dataURL,callback) {
 MockWorker = function(script) {
 	var parent = this;
 	this.listeners = [];
+	this.terminates = [];
 	this.context = { 'listeners' : [] };
+	this.context.close = function() {};
 	this.context.indexedDB = MockWorker.indexedDB;
 	this.context.XMLHttpRequest = MockWorker.XMLHttpRequest;
 	this.context.addEventListener = function(type,callback) {
@@ -42,7 +44,12 @@ MockWorker.indexedDB = indexedDB;
 
 
 MockWorker.prototype.addEventListener = function(type,callback) {
-	this.listeners.push(callback);
+	if (type == "message") {
+		this.listeners.push(callback);
+	}
+	if (type == "terminate") {
+		this.terminates.push(callback);
+	}
 };
 
 MockWorker.prototype.removeEventListener = function(type,callback) {
@@ -50,6 +57,15 @@ MockWorker.prototype.removeEventListener = function(type,callback) {
 		this.listeners.splice(this.listeners.indexOf(callback),1);
 	}
 };
+
+MockWorker.prototype.dispatchEvent = function(type) {
+	if (type == "terminate") {
+		this.terminates.forEach(function(cb) {
+			cb.call(this);
+		});
+	}
+};
+
 
 MockWorker.prototype.postMessage = function(message) {
 	var self = this;

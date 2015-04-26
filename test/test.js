@@ -16,14 +16,14 @@ QUnit.test( "Test sync class defined", function( assert ) {
     assert.ok(typeof OneNoteSync !== 'undefined', "Passed!" );
 });
 
-QUnit.test( "Test init of worker and database",function( assert ) {
+QUnit.test( "Test init of worker and database using mock",function( assert ) {
     var done = assert.async();
     var spy = sinon.spy(mockIndexedDBDatabase, "createObjectStore");
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         assert.ok(onenote !== null, 'Have onenote object');
         assert.ok(JSON.stringify(spy.args) === '[["synclocks"],["syncelements"]]' ,"Created two object stores");
-        onenote.terminate();
+        OneNoteSync.terminate();
         done();
     }).catch(function(err) {
         assert.ok(false,err);
@@ -31,45 +31,74 @@ QUnit.test( "Test init of worker and database",function( assert ) {
         done();
     });
 });
-
+*/
 QUnit.module("Testing web worker startup and shutdown", {
     beforeEach: function() {
         window.originalWorker = window.Worker;
         window.Worker = MockWorker;
-        indexedDB.deleteDatabase('onenote');
     },
     afterEach: function() {
         window.Worker = window.originalWorker;
-        indexedDB.deleteDatabase('onenote');
     }
 });
 
-QUnit.test( "Test init of worker and database" , function( assert ) {
+QUnit.test( "Test init of worker and database using real DB" , function( assert ) {
     var done = assert.async();
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         assert.ok(onenote !== null, 'Have onenote object');
-        onenote.terminate();
-        done();
+        OneNoteSync.terminate();
+        var req = indexedDB.deleteDatabase('onenote');
+        req.onsuccess = function() {
+            done();
+        };
+        req.onerror = function() {
+            done();
+        };
+        req.onblocked = function(ev) {
+            console.log("Blocked",ev);
+        };
     }).catch(function(err) {
         assert.ok(false,err);
         assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");
-        done();
+        var req = indexedDB.deleteDatabase('onenote');
+        req.onsuccess = function() {
+            done();
+        };
+        req.onerror = function() {
+            done();
+        };
+        req.onblocked = function(ev) {
+            console.log("Blocked",ev);
+        };
     });
 });
 
 
 QUnit.test( "Test shutdown of worker" , function( assert ) {
     var done = assert.async();
+    console.log("Creating new onenotesync object");
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         assert.ok(onenote !== null, 'Have onenote object');
-        onenote.terminate();
-        done();
+        OneNoteSync.terminate();
+        var req = indexedDB.deleteDatabase('onenote');
+        req.onsuccess = function() {
+            done();
+        };
+        req.onerror = function() {
+            done();
+        };
     }).catch(function(err) {
         assert.ok(false,err);
         assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");
-        done();
+        var req = indexedDB.deleteDatabase('onenote');
+        req.onsuccess = function() {
+            done();
+        };
+        req.onerror = function() {
+            done();
+        };
     });
 });
 
