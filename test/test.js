@@ -31,7 +31,7 @@ QUnit.test( "Test init of worker and database using mock",function( assert ) {
         done();
     });
 });
-*/
+
 QUnit.module("Testing web worker startup and shutdown", {
     beforeEach: function() {
         window.originalWorker = window.Worker;
