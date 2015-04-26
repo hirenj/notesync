@@ -83,6 +83,15 @@ var worker_function = function(self) {
         'is_ready' : function() {
             return local_db.then(function() { return true; });
         },
+        'terminate' : function() {
+            local_db.then(function(db) {
+                db.close();
+            });
+            self.postMessage({"event" : "terminate" });
+            setTimeout(function() {
+                self.close();
+            },1000);
+        },
         'add_document' : function(document_id) {
             if ( ! element_paths[document_id]) {
                 element_paths[document_id] = [];
@@ -550,6 +559,11 @@ var onenoteEngine = function onenoteEngine(env) {
             return page_metas.filter(function(page) {
                 return last_sync.getTime() < (new Date(page.lastModifiedTime)).getTime();
             });
+        }).then(function( page_metas ) {
+            page_metas.forEach(function(page) {
+                page.wanted = true;
+            });
+            return page_metas;
         });
     };
 
@@ -830,6 +844,11 @@ if ("Worker" in window && window.location.hash === '') {
                 }
                 common_worker.addEventListener('message',function(e) {
                     if (e.data) {
+                        if (e.data.event && e.data.event == 'terminate') {
+                            var event = new Event('terminate');
+                            common_worker.dispatchEvent(event);
+                            return;
+                        }
                         if (e.data.event) {
                             console.log("Received event",e.data);
                         }
@@ -837,6 +856,7 @@ if ("Worker" in window && window.location.hash === '') {
                 });
                 resolve(common_worker);
             });
+            return worker;
         };
 
 
@@ -859,7 +879,7 @@ if ("Worker" in window && window.location.hash === '') {
                     }
                 };
 
-                worker.catch(define_worker).then(function(worker) {
+                worker.catch(reject).then(function(worker) {
                     worker.addEventListener('message',receive_func);
                     worker.postMessage(message_block);
                     setTimeout(function() {
@@ -872,7 +892,11 @@ if ("Worker" in window && window.location.hash === '') {
         };
 
         var OneNoteSync = function() {
-            this.ready = worker.catch(define_worker).then(function() {
+            var self = this;
+            this.ready = worker.catch(define_worker).then(function(common_worker) {
+                common_worker.addEventListener('terminate',function() {
+                    self.ready = Promise.reject(false);
+                });
                 return worker_method('is_ready');
             });
         };
@@ -907,11 +931,10 @@ if ("Worker" in window && window.location.hash === '') {
             return worker_method('set_oauth_token', [ token ] );
         };
 
-        OneNoteSync.prototype.terminate = function() {
-            worker.then(function(common_worker) {
-                common_worker.terminate();
+        OneNoteSync.terminate = function() {
+            worker_method('terminate').then(function() {
+                worker = Promise.reject(new Error("Common worker has been terminated"));
             });
-            worker = Promise.reject(false);
         };
         return OneNoteSync;
     })();
