@@ -40,8 +40,8 @@ var worker_function = function(self) {
             // We wish to loop through the data from
             // the newest entries added to the oldest entries
             var key_cursor = idx.openCursor(range,"prev");
-            key_cursor.onsuccess = function() {
-                var cursor = key_cursor.result;
+            key_cursor.onsuccess = function(ev) {
+                var cursor = ev.target.result;
                 if (cursor) {
                     try {
                         var retval = callback(cursor);
@@ -849,9 +849,6 @@ if ("Worker" in window && window.location.hash === '') {
                             common_worker.dispatchEvent(event);
                             return;
                         }
-                        if (e.data.event) {
-                            console.log("Received event",e.data);
-                        }
                     }
                 });
                 resolve(common_worker);
@@ -897,6 +894,13 @@ if ("Worker" in window && window.location.hash === '') {
                 common_worker.addEventListener('terminate',function() {
                     self.ready = Promise.reject(false);
                 });
+                common_worker.addEventListener('message',function(e) {
+                    if (e.data) {
+                        if (e.data.event == 'change') {
+                            notify_changed(self,e.data);
+                        }
+                    }
+                });
                 return worker_method('is_ready');
             });
         };
@@ -917,6 +921,23 @@ if ("Worker" in window && window.location.hash === '') {
             return worker_method('set_values', [doc, element, values]);
         };
 
+        var notify_changed = function(self,event) {
+            self.watchers.forEach(function(watcher) {
+                if (watcher.page_id == event.page_id && watcher.element_id == watcher.element_id) {
+                    watcher(event.value);
+                }
+            });
+        };
+
+        OneNoteSync.prototype.notifyChanges = function(doc,element,callback) {
+            this.watchers = this.watchers || [];
+            this.watchers.push(callback);
+            worker_method('watch_element', [ doc, element ]).then(function() {
+                callback.page_id = doc;
+                callback.element_id = element;
+            });
+        };
+
         OneNoteSync.prototype.appendTable = function(doc,table) {
             if ( ! table ) {
                 table = [];
@@ -932,7 +953,7 @@ if ("Worker" in window && window.location.hash === '') {
         };
 
         OneNoteSync.terminate = function() {
-            worker_method('terminate').then(function() {
+            return worker_method('terminate').then(function() {
                 worker = Promise.reject(new Error("Common worker has been terminated"));
             });
         };

@@ -335,6 +335,9 @@ var mockIndexedDBStore = {
 		}
 	},
 
+	'index' : function() {
+		return this;
+	},
 	'openCursor' : function() {
 		if (mockIndexedDBTestFlags.canReadDB === true) {
 			mockIndexedDB_storeOpenCursorTimer = setTimeout(function() {
