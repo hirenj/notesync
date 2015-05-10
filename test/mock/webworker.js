@@ -58,8 +58,8 @@ MockWorker.prototype.removeEventListener = function(type,callback) {
 	}
 };
 
-MockWorker.prototype.dispatchEvent = function(type) {
-	if (type == "terminate") {
+MockWorker.prototype.dispatchEvent = function(evt) {
+	if (evt.type == "terminate") {
 		this.terminates.forEach(function(cb) {
 			cb.call(this);
 		});

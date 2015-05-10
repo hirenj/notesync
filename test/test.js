@@ -43,6 +43,7 @@ QUnit.module("Sync data model with stored data",{
     afterEach: function() {
         window.Worker.indexedDB = window.indexedDB;
         window.Worker = window.originalWorker;
+        sinon.config.useFakeTimers = true;
     }
 });
 
@@ -101,6 +102,23 @@ QUnit.test( "Test watching of database, changing value sequentially", function(a
         });
     });
 });
+
+
+QUnit.test( "Test watching of database with watched documents in db already", function(assert) {
+    var done = assert.async();
+    commitIndexedDBMockData('a', { 'page_id' : 'foo', 'element_id' : 'bar', 'source' : 'remote', 'value' : JSON.stringify({'foobar' : 'foo-existing'}) });
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        setTimeout(function() {
+            onenote.getValues('foo','bar').then(function(val) {
+                assert.ok(val.foobar == "foo-existing","Got a value from the database");
+                OneNoteSync.terminate();
+                done();
+            });
+        },3000);
+    });
+});
+
 
 
 QUnit.module("Testing web worker startup and shutdown", {

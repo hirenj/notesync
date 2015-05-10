@@ -87,6 +87,7 @@ var worker_function = function(self) {
             local_db.then(function(db) {
                 db.close();
             });
+            clearInterval(db_watcher);
             self.postMessage({"event" : "terminate" });
             setTimeout(function() {
                 self.close();
@@ -171,7 +172,7 @@ var worker_function = function(self) {
         });
     };
 
-    setInterval(database_watcher,1000);
+    var db_watcher = setInterval(database_watcher,1000);
 
     var read_synced_ids = function() {
         return local_db.then(function(db) {
@@ -888,19 +889,26 @@ if ("Worker" in window && window.location.hash === '') {
             });
         };
 
+        var change_watcher = function(self) {
+            return function(e) {
+                if (e.data) {
+                    if (e.data.event == 'change') {
+                        notify_changed(self,e.data);
+                    }
+                }
+            };
+        };
+
         var OneNoteSync = function() {
             var self = this;
             this.ready = worker.catch(define_worker).then(function(common_worker) {
+                var change_watcher_fn = change_watcher(self);
+
                 common_worker.addEventListener('terminate',function() {
                     self.ready = Promise.reject(false);
+                    common_worker.removeEventListener('message',change_watcher_fn);
                 });
-                common_worker.addEventListener('message',function(e) {
-                    if (e.data) {
-                        if (e.data.event == 'change') {
-                            notify_changed(self,e.data);
-                        }
-                    }
-                });
+                common_worker.addEventListener('message',change_watcher_fn);
                 return worker_method('is_ready');
             });
         };
@@ -919,6 +927,12 @@ if ("Worker" in window && window.location.hash === '') {
 
         OneNoteSync.prototype.setValues = function(doc,element,values) {
             return worker_method('set_values', [doc, element, values]);
+        };
+
+        OneNoteSync.prototype.getValues = function(doc,element) {
+            return worker_method('get_values', [doc, element]).then(function(val) {
+                return JSON.parse(val);
+            });
         };
 
         var notify_changed = function(self,event) {
