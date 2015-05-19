@@ -191,6 +191,9 @@ var worker_function = function(self) {
 
     var lock_and_synchronise = function() {
         return obtain_lock().then(function() {
+            if (! self.syncEngine ) {
+                return Promise.resolve(true);
+            }
             return synchronise_documents().catch(function(error) {
                 // FIXME - do something with the error here
                 return Promise.resolve(true);
@@ -423,7 +426,7 @@ var worker_function = function(self) {
                 var lock_timedout = lock ? new Date() >= (new Date(lock.time.getTime() + 30*60000)) : true;
                 if ( ! lock_timedout ) {
                     console.log("Already syncing - not doing anything");
-                    return Promise.reject(false);
+                    return Promise.reject(new Error("Sync in progress"));
                 }
                 return store_put( store ,'lock',{'time' : new Date(), 'lock' : 'lock' }).then(function(locked) {
                     console.log("Obtained LOCK for sync");
@@ -510,6 +513,12 @@ var worker_function = function(self) {
             Promise.resolve(methods[e.data.method].apply(null,e.data.arguments)).then(function(val) {
                 self.postMessage( { 'method' : e.data.method, 'message_id' : e.data.message_id, 'value' : val }  );
             },function(err) {
+                if (err instanceof Error) {
+                    err = err.message;
+                }
+                if (typeof err == "object") {
+                    err = JSON.stringify(err);
+                }
                 self.postMessage( { 'method' : e.data.method, 'message_id' : e.data.message_id, 'error' : err }  );
             });
         }
@@ -824,12 +833,13 @@ if ("Worker" in window && window.location.hash === '') {
 
         var worker = Promise.reject(true);
         var define_worker = function() {
+            var self = this;
             worker = new Promise(function(resolve,reject) {
                 console.log("Defining worker");
                 var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
                 common_worker.postMessage();
                 common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()+"\nself.tXml = tXml;"], {'type' : 'text/javascript'})) });
-                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([onenoteEngine.toString()+"\nonenoteEngine(self); self.syncEngine = self.OneNoteSyncEngine;"], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([self.constructor.Engine()], {'type' : 'text/javascript'})) });
                 if ( window.WL ) {
 
                     WL.init({
@@ -901,7 +911,7 @@ if ("Worker" in window && window.location.hash === '') {
 
         var OneNoteSync = function() {
             var self = this;
-            this.ready = worker.catch(define_worker).then(function(common_worker) {
+            this.ready = worker.catch(define_worker.bind(self)).then(function(common_worker) {
                 var change_watcher_fn = change_watcher(self);
 
                 common_worker.addEventListener('terminate',function() {
@@ -911,6 +921,10 @@ if ("Worker" in window && window.location.hash === '') {
                 common_worker.addEventListener('message',change_watcher_fn);
                 return worker_method('is_ready');
             });
+        };
+
+        OneNoteSync.Engine = function() {
+            return onenoteEngine.toString()+"\nonenoteEngine(self); self.syncEngine = self.OneNoteSyncEngine;";
         };
 
         OneNoteSync.prototype.listNotebooks = function() {

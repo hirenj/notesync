@@ -23,6 +23,7 @@ QUnit.test( "Test init of worker and database using mock",function( assert ) {
     onenote.ready.then(function() {
         assert.ok(onenote !== null, 'Have onenote object');
         assert.ok(JSON.stringify(spy.args) === '[["synclocks"],["syncelements"]]' ,"Created two object stores");
+        spy.restore();
         OneNoteSync.terminate();
         done();
     }).catch(function(err) {
@@ -189,3 +190,93 @@ QUnit.test( "Test shutdown of worker" , function( assert ) {
         };
     });
 });
+
+QUnit.module("Testing obtaining locks", {
+    beforeEach: function() {
+        window.originalWorker = window.Worker;
+        window.Worker = MockWorker;
+        mockSyncEngine.mockEngine(window.OneNoteSync);
+        sinon.config.useFakeTimers = false;
+    },
+    afterEach: function() {
+        window.Worker = window.originalWorker;
+        mockSyncEngine.unmockEngine(window.OneNoteSync);
+        mockSyncEngine.reset();
+        sinon.config.useFakeTimers = true;
+    }
+});
+
+QUnit.test( "Test simple sync" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var spy = sinon.spy(mockSyncEngine, "downloadRemoteContent");
+        onenote.watchElement('foo','bar').then(onenote.sync.bind(onenote)).then(function() {
+            assert.ok(spy.called, 'MockSyncEngine properly installed');
+            spy.restore();
+            OneNoteSync.terminate();
+            var req = indexedDB.deleteDatabase('onenote');
+            req.onsuccess = function() {
+                done();
+            };
+            req.onerror = function() {
+                done();
+            };
+        }).catch(console.error.bind(console));
+    });
+});
+
+QUnit.test( "Test two parallel syncs" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var spy = sinon.spy(mockSyncEngine, "downloadRemoteContent");
+        mockSyncEngine_downloadRemoteContentWaitTime = 3000;
+        onenote.watchElement('foo','bar').then(function() {
+            onenote.sync();
+            return new Promise(function(resolve) {
+                setTimeout(function() {
+                    resolve(onenote.sync());
+                },1000);
+            });
+        }).then(function() {
+            // assert.not ok?
+            OneNoteSync.terminate();
+            var req = indexedDB.deleteDatabase('onenote');
+            req.onsuccess = function() {
+                done();
+            };
+            req.onerror = function() {
+                done();
+            };
+        }).catch(function(err) {
+            assert.ok(err == 'Sync in progress','Rejecting second sync call');
+            assert.ok(spy.calledOnce, 'downloadRemoteContent only called once');
+            OneNoteSync.terminate();
+            var req = indexedDB.deleteDatabase('onenote');
+            req.onsuccess = function() {
+                done();
+            };
+            req.onerror = function() {
+                done();
+            };
+        }).then(function() {
+            spy.restore();
+        });
+    });
+});
+
+// Tests to write
+
+// Synchronisation locks
+// Mock engine.downloadRemoteContent
+
+// Combinations of results from synchronisation. Need to mock the API requests here?
+// Need to test the syncTime parts - make the server respond like there's no new values etc
+
+
+// Mock     engine.downloadRemoteContent = function(element_paths,last_sync) {
+    // Should return Promise of json blocks to with stringified values to insert into sync engine
+
+// Mock     engine.sendData = function(data) {
+    // Should return promise that will fire whenever data is eventually sent.
