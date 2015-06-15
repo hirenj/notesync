@@ -231,7 +231,38 @@ var mockIndexedDBStoreTransaction = {
 	}
 };
 
-var mockIndexedDBStore = {
+mockIndexedDBStoreTransaction.__defineSetter__("oncomplete", function(cb) {
+	cb();
+});
+
+
+var IDBObjectStore = function() {};
+
+var mockIndexedDBStore_class = function() {};
+mockIndexedDBStore_class.prototype = new IDBObjectStore();
+
+mockIndexedDBStore = new mockIndexedDBStore_class();
+
+if ( ! Object.assign ) {
+	var canBeObject = function (obj) {
+		return typeof obj !== 'undefined' && obj !== null;
+	};
+	Object.assign = function assign(target, source1) {
+		if (!canBeObject(target)) { throw new TypeError('target must be an object'); }
+		var objTarget = Object(target);
+		var s, source, i, props;
+		for (s = 1; s < arguments.length; ++s) {
+			source = Object(arguments[s]);
+			props = Object.keys(source);
+			for (i = 0; i < props.length; ++i) {
+				objTarget[props[i]] = source[props[i]];
+			}
+		}
+		return objTarget;
+	};
+}
+Object.assign(mockIndexedDBStore,
+{
 	'identity' : 'mockedStore',
 
 	// add returns a different txn than delete does. in indexedDB, the listeners are
@@ -253,12 +284,30 @@ var mockIndexedDBStore = {
 
 		return mockIndexedDBTransaction;
 	},
-
+	'get' : function(key) {
+		var result = {
+			'done' : function() {
+				result.result = mockIndexedDBItems.filter(function(item) {
+					return item.key == key;
+				}).map(function(item) { return item.value; });
+				if (result.result.length == 0) {
+					result.result = null;
+				} else {
+					result.result = result.result[0];
+				}
+				result.onsuccess();
+			}
+		};
+		setTimeout(function() {
+			result.done();
+		},200);
+		return result;
+	},
 	// for now, treating put just like an add.
 	// TODO: do an update instead of adding
-	'put' : function(data) {
+	'put' : function(data,key) {
 		if (mockIndexedDBTestFlags.canSave === true) {
-			mockIndexedDBItems.push(data);
+			mockIndexedDBItems.push({ 'key' : key, 'value' : data } );
 			mockIndexedDB_storeAddTimer = setTimeout(function() {
 				mockIndexedDBTransaction.callCompleteHandler();
 				mockIndexedDB_saveSuccess = true;
@@ -354,8 +403,9 @@ var mockIndexedDBStore = {
 
 		return mockIndexedDBCursorRequest;
 	},
-	'onsuccess' : null
-};
+	'onsuccess' : null,
+	'transaction' : mockIndexedDBStoreTransaction
+});
 
 var mockIndexedDBTransaction = {
 	'objectStore' : function(name) {
@@ -363,6 +413,9 @@ var mockIndexedDBTransaction = {
 	},
 
 	'callCompleteHandler' : function() {
+		if ( ! this.oncomplete ) {
+			this.oncomplete = this.onsuccess;
+		}
 		if (this.oncomplete !== null) {
 			var event = new CustomEvent("complete", { bubbles: false, cancelable: true });
 			this.oncomplete(event);
@@ -418,7 +471,14 @@ var mockIndexedDBDatabase = {
 var mockIndexedDBOpenDBRequest = {
 	'callSuccessHandler' : function() {
 		if (this.onsuccess !== null) {
-			var event = new CustomEvent("success", { bubbles: false, cancelable: true });
+			var event = {
+				'type' : 'success',
+				'bubbles' : false,
+				'cancelable' :true,
+				'target' : { 'result' : mockIndexedDBDatabase }
+			};
+
+			//new CustomEvent("success", { bubbles: false, cancelable: true });
 			this.onsuccess(event);
 		}
 	},

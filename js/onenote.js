@@ -42,7 +42,7 @@ var worker_function = function(self) {
             var key_cursor = idx.openCursor(range,"prev");
             key_cursor.onsuccess = function(ev) {
                 var cursor = ev.target.result;
-                if (cursor) {
+                if (cursor && cursor.value) {
                     try {
                         var retval = callback(cursor);
                     } catch (e) {
@@ -175,9 +175,13 @@ var worker_function = function(self) {
     var db_watcher = setInterval(database_watcher,1000);
 
     var read_synced_ids = function() {
+        var existing_data = false;
         return local_db.then(function(db) {
-            loop_cursor(db,null,function(cursor) {
+            return loop_cursor(db,null,function(cursor) {
+                existing_data = true;
                 methods['watch_element'](cursor.value.page_id,cursor.value.element_id);
+            }).then(function() {
+                return existing_data;
             });
         });
     };
@@ -283,6 +287,9 @@ var worker_function = function(self) {
 
             return loop_cursor(store,data,function(cursor) {
                 if ( ! cursor.value.parent ) {
+                    // This remote value can overwrite the
+                    // local value (marked with the new attribute)
+                    // since the value is the same
                     if (cursor.value.new && cursor.value.value === data.value ) {
                         store.delete(cursor.primaryKey);
                     }
@@ -500,8 +507,10 @@ var worker_function = function(self) {
     self.do_api_call = do_api_call;
     self.methods = methods;
 
-    read_synced_ids().then(function() {
-        lock_and_synchronise();
+    read_synced_ids().then(function(existing_data) {
+        if (existing_data) {
+            lock_and_synchronise();            
+        }
     });
 
     self.addEventListener('message', function(e) {
