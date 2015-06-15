@@ -100,6 +100,7 @@ function resetIndexedDBMock() {
 	clearTimeout(mockIndexedDB_storeClearTimer);
 	clearTimeout(mockIndexedDB_storeOpenCursorTimer);
 	clearTimeout(mockIndexedDB_deleteDBTimer);
+	mockIndexedDBTransaction.oncomplete = null;
 }
 
 /**

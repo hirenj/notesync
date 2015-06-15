@@ -160,7 +160,7 @@ var worker_function = function(self) {
         Promise.all( ids_to_watch.map( function(ids) { return get_latest_data(ids[0],ids[1]); } ) ).then(
         function(vals) {
             vals.forEach(function(val) {
-                if ( ! val ) {
+                if ( ! val || ! val.page_id || ! val.element_id ) {
                     return;
                 }
                 if (extracted[val.page_id][val.element_id] != val.value) {
