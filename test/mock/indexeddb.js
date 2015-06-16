@@ -136,6 +136,10 @@ var mockIndexedDBCursor = {
 	}
 };
 
+
+mockIndexedDBCursor.__defineGetter__("source", function() {
+	return { 'objectStore' : mockIndexedDBStore };
+});
 /**
  * with each call to continue() to get the cursor, the object will
  * have a key and value property. these are defined by the getters.
@@ -149,6 +153,17 @@ mockIndexedDBCursor.__defineGetter__("key", function() {
 		return null;
 	}
 });
+
+mockIndexedDBCursor.__defineGetter__("primaryKey", function() {
+	if (mockIndexedDB_cursorResultsIndex < mockIndexedDBItems.length) {
+		var item = mockIndexedDBItems[mockIndexedDB_cursorResultsIndex];
+		return item.key;
+	}
+	else {
+		return null;
+	}
+});
+
 
 mockIndexedDBCursor.__defineGetter__("value", function() {
 	if (mockIndexedDB_cursorResultsIndex < mockIndexedDBItems.length) {
@@ -327,6 +342,11 @@ Object.assign(mockIndexedDBStore,
 	// for delete, the listeners are attached to a request returned from the store.
 	'delete' : function(data_id) {
 		if (mockIndexedDBTestFlags.canDelete === true) {
+			if (data_id) {
+				mockIndexedDBItems = mockIndexedDBItems.filter(function(item){
+					return item.key.toString() != data_id.toString();
+				});
+			}
 			mockIndexedDB_storeDeleteTimer = setTimeout(function() {
 				mockIndexedDBStoreTransaction.callSuccessHandler();
 				mockIndexedDB_deleteSuccess = true;
