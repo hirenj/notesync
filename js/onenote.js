@@ -959,7 +959,7 @@ if ("Worker" in window && window.location.hash === '') {
         };
 
         var notify_changed = function(self,event) {
-            self.watchers.forEach(function(watcher) {
+            (self.watchers || []).forEach(function(watcher) {
                 if (watcher.page_id == event.page_id && watcher.element_id == watcher.element_id) {
                     watcher(event.value);
                 }
