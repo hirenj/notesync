@@ -183,8 +183,8 @@ QUnit.test( "Test remote overwriting local with same value" , function( assert )
         onenote.watchElement('page','element').then(function() {
             return onenote.sync();
         }).then(function() {
-            assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length == 1,"Stored remote data");
-            assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.value == '{"new":true}' && item.value.source == 'remote'; }).length == 1,"Stored remote data");
+            assert.equal(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length , 1,"Stored remote data");
+            assert.equal(mockIndexedDBItems.filter(function(item) { return item.value.value == '{"new":true}' && item.value.source == 'remote'; }).length, 1,"Stored remote data");
             OneNoteSync.terminate();
             done();
         }).catch(function(err) {
@@ -209,6 +209,34 @@ New state:
 [local-val1 (parent new-val2),new-val2]
 */
 
+QUnit.test( "Test updating parent on a local value with new remote" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var local = sync_block(true,'1/1/1980','{}');
+        local.parent = new Date('1/1/1979');
+        set_local_state([sync_block(false,'1/1/1979','{"foo":"bar"}'),local]);
+        mockSyncEngine_downloadRemoteContentNewData = [sync_block(false,'2/1/1980','{"baz":true}')];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            states = mockIndexedDBItems.filter(function(item) { return item.value.source; }).map(function(item) { return item.value; });
+            assert.equal(states.length, 2,"Correct number of states in db");
+            assert.equal(states[0].value,"{}");
+            assert.equal(states[0].parent, states[1].modified);
+            assert.equal(states[0].source,"local");
+            assert.equal(states[1].source,"remote");
+            assert.equal(states[1].value,'{"baz":true}');
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
+
 /*
 Local state:
 [old,local-val-parent-old]
@@ -219,6 +247,32 @@ Remote state:
 New state:
 [new-val]
 */
+
+QUnit.test( "Test updating parent on a local value with remote matching existing value" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var local = sync_block(true,'1/1/1980','{}');
+        local.parent = new Date('1/1/1979');
+        set_local_state([sync_block(false,'1/1/1979','{"foo":"bar"}'),local]);
+        mockSyncEngine_downloadRemoteContentNewData = [sync_block(false,'2/1/1980','{}')];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            states = mockIndexedDBItems.filter(function(item) { return item.value.source; }).map(function(item) { return item.value; });
+            assert.equal(states.length, 1,"Correct number of states in db");
+            assert.equal(states[0].value,"{}");
+            assert.equal(states[0].source,"remote");
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
+
 
 /*
 Local state:
@@ -231,6 +285,34 @@ New state:
 [local-parent-new-val,new-val]
 */
 
+QUnit.test( "Test updating parent on a local value with a remote that has only date updated" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var local = sync_block(true,'1/1/1980','{}');
+        local.parent = new Date('1/1/1979');
+        set_local_state([sync_block(false,'1/1/1979','{"foo":"bar"}'),local]);
+        mockSyncEngine_downloadRemoteContentNewData = [sync_block(false,'2/1/1980','{"foo":"bar"}')];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            states = mockIndexedDBItems.filter(function(item) { return item.value.source; }).map(function(item) { return item.value; });
+            assert.equal(states.length, 2,"Correct number of states in db");
+            assert.equal(states[0].value,"{}");
+            assert.equal(states[0].parent, states[1].modified);
+            assert.equal(states[0].source,"local");
+            assert.equal(states[1].source,"remote");
+            assert.equal(states[1].value,'{"foo":"bar"}');
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
+
 /*
 Local state:
 [old,local-orphan]
@@ -242,6 +324,30 @@ New state:
 [new]
 */
 
+QUnit.test( "Test adding remote value when there is a local value without a valid parent" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var local = sync_block(true,'1/1/1980','{}');
+        local.parent = new Date('1/1/1978');
+        set_local_state([sync_block(false,'1/1/1979','{"foo":"bar"}'),local]);
+        mockSyncEngine_downloadRemoteContentNewData = [sync_block(false,'2/1/1980','{}')];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            states = mockIndexedDBItems.filter(function(item) { return item.value.source; }).map(function(item) { return item.value; });
+            assert.equal(states.length, 1,"Correct number of states in db");
+            assert.equal(states[0].source,"remote");
+            assert.equal(states[0].value,'{}');
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
 
 /*
 LOCAL RESOLUTION

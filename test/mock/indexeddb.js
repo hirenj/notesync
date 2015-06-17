@@ -323,7 +323,16 @@ Object.assign(mockIndexedDBStore,
 	// TODO: do an update instead of adding
 	'put' : function(data,key) {
 		if (mockIndexedDBTestFlags.canSave === true) {
-			mockIndexedDBItems.push({ 'key' : key, 'value' : data } );
+			var existing = mockIndexedDBItems.filter(function(item) {
+				return item.key.toString() == key.toString();
+			});
+			if (existing.length > 0) {
+				existing.forEach(function(item) {
+					item.value = data;
+				});
+			} else {
+				mockIndexedDBItems.push({ 'key' : key, 'value' : data } );				
+			}
 			mockIndexedDB_storeAddTimer = setTimeout(function() {
 				mockIndexedDBTransaction.callCompleteHandler();
 				mockIndexedDB_saveSuccess = true;
