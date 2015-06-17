@@ -418,7 +418,6 @@ QUnit.test( "Test adding a local value with the same value as remote" , function
             return onenote.sync();
         }).then(function() {
             states = mockIndexedDBItems.filter(function(item) { return item.value.source; }).map(function(item) { return item.value; });
-            console.log(JSON.stringify(states));
             assert.equal(states.length, 1,"Correct number of states in db");
             assert.equal(states[0].value,'{"foo":"bar"}');
             assert.equal(states[0].source,"remote");
@@ -443,4 +442,28 @@ New state:
 [new] - Undefined behaviour here?
 */
 
-
+QUnit.test( "Test adding a local value in an empty db" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        set_local_state([]);
+        var new_local = sync_block(true,'2/1/1980','{"foo":"bar"}');
+        mockSyncEngine_downloadRemoteContentNewData = [new_local];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            states = mockIndexedDBItems.filter(function(item) { return item.value.source; }).map(function(item) { return item.value; });
+            assert.equal(states.length, 2,"Correct number of states in db");
+            assert.equal(states[0].value,'{"foo":"bar"}');
+            assert.equal(states[0].source,"local");
+            assert.equal(states[1].value,'{"foo":"bar"}');
+            assert.equal(states[1].source,"remote");
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
