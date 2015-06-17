@@ -1,0 +1,22 @@
+{
+  "name": "notesync",
+  "version": "0.0.1",
+  "description": "",
+  "main": "js/onenote.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "karma": "^0.12.36",
+    "karma-chrome-launcher": "^0.1.12",
+    "karma-qunit": "^0.1.4",
+    "qunit": "^0.7.6",
+    "qunitjs": "^1.18.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Hiren Joshi",
+  "license": "MIT"
+}
