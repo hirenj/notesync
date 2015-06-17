@@ -140,6 +140,26 @@ New state:
 [old] (Throw error)
 */
 
+QUnit.test( "Test accepting an older remote value than existing" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        set_local_state([sync_block(false,'1/1/1980','{"foo":"bar"}')]);
+        mockSyncEngine_downloadRemoteContentNewData = [sync_block(false,'1/1/1979','{}')];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length == 1,"Stored remote data");
+            assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.value == '{"foo":"bar"}'; }).length == 1,"Stored remote data");
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
 
 /*
 Local state:
@@ -152,6 +172,28 @@ New state:
 [new-val]
 */
 
+QUnit.test( "Test remote overwriting local with same value" , function( assert ) {
+    var done = assert.async();
+    var onenote = new OneNoteSync();
+    onenote.ready.then(function() {
+        var new_block = sync_block(true,'1/1/1980','{"new":true}');
+        new_block.new = true;
+        set_local_state([sync_block(false,'1/1/1979','{"foo":"bar"}'),new_block]);
+        mockSyncEngine_downloadRemoteContentNewData = [sync_block(false,'2/1/1980','{"new":true}')];
+        onenote.watchElement('page','element').then(function() {
+            return onenote.sync();
+        }).then(function() {
+            assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length == 1,"Stored remote data");
+            assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.value == '{"new":true}' && item.value.source == 'remote'; }).length == 1,"Stored remote data");
+            OneNoteSync.terminate();
+            done();
+        }).catch(function(err) {
+            console.log("Failed sync ",err);
+            OneNoteSync.terminate();
+            done();
+        });
+    });
+});
 
 
 /*
