@@ -476,7 +476,7 @@ var worker_function = function(self) {
         if (params) {
             Object.keys(params).forEach(function(par) {
                 // CSRF risk point here
-                if (params[par].match(/^[A-Za-z\.\-\:0-9\!]+$/)) {
+                if (params[par].match(/^[A-Za-z\.\-\:\ 0-9\!]+$/)) {
                     url = url.replace("<"+par+">",params[par]);
                 }
             });
@@ -538,7 +538,8 @@ var worker_function = function(self) {
 var onenoteEngine = function onenoteEngine(env) {
 
     const list_notebooks_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
-    const list_notebook_pages_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&expand=sections";
+    const list_notebook_sections_url = "https://www.onenote.com/api/v1.0/notebooks?orderby=lastModifiedTime&select=id,name&filter=name eq '<NAME>'&expand=sections";
+    const list_section_pages_url = "https://www.onenote.com/api/v1.0/sections/<ID>/pages?orderby=lastModifiedTime&select=id,title&filter=title eq '<TITLE>'";
     const list_updated_pages_url = "https://www.onenote.com/api/v1.0/pages?select=id,title,lastModifiedTime,createdTime&orderby=lastModifiedTime desc&filter=lastModifiedTime gt <TIME>";
     const get_page_last_modified_url = "https://www.onenote.com/api/beta/pages/<ID>?select=id,title,lastModifiedTime,createdTime";
     const get_page_content_url = "https://www.onenote.com/api/beta/pages/<ID>/content?includeIDs=true";
@@ -557,6 +558,12 @@ var onenoteEngine = function onenoteEngine(env) {
             return env.do_api_call(list_notebooks_url,env.token).then(function(json) {
                 return json.value;
             });
+        };
+        env.methods['list_tables_for_page'] = function(notebook,section,page) {
+            if ( ! env.token ) {
+                throw new Error("No AUTH token");
+            }
+            return list_tables_for_page(notebook,section,page);
         };
     };
 
@@ -599,6 +606,40 @@ var onenoteEngine = function onenoteEngine(env) {
         });
     };
 
+    var list_tables_for_page = function(notebook,section,page) {
+        return env.do_api_call(list_notebook_sections_url,env.token,false,{
+            'NAME' : notebook
+        }).then(function(sections) {
+            if (sections && sections.value) {
+                return list_pages_for_sections(sections.value[0].sections,section,page);
+            }
+            return [];
+        }).then(get_page_contents).then(function(contents) {
+            console.log(contents);
+            return extract_tags_from_contents('table',contents);
+        });
+    };
+
+    var list_pages_for_sections = function(sections,section,page) {
+
+        var wanted_sections = sections.filter(function(section_data) {
+            return section_data.name == section;
+        }).map(function(section_data) { return section_data.id; });
+
+        var page_data = wanted_sections.map(function(section_id) {
+            return do_api_call(list_section_pages_url,env.token,false,{ 'ID' : section_id, 'TITLE' : page });
+        });
+
+        return Promise.all(page_data).then(function(pages) {
+            var page_ids = pages.map(function(page) {
+                if (page.value) {
+                    return page.value.map(function(page_data) { return { 'id' : page_data.id }; });
+                }
+            });
+            return Array.prototype.concat.apply([], page_ids);
+        });
+    };
+
     var patch_page = function(page_id,change_block) {
         return env.do_api_call(patch_page_url,env.token,false, {
             'ID' : page_id,
@@ -627,6 +668,22 @@ var onenoteEngine = function onenoteEngine(env) {
 
         return Promise.all(promises);
 
+    };
+
+    var tag_search = function(root,tagname) {
+        if (root.tagName === tagname) {
+            return [root];
+        }
+        var kids = [].concat(root.children || []);
+        var target;
+        var results = [];
+        while (kids.length > 0) {
+            target = tag_search(kids.shift(),tagname);
+            if (target) {
+                results = results.concat(target);
+            }
+        }
+        return results;
     };
 
     var children_search = function(root,element_id) {
@@ -696,6 +753,17 @@ var onenoteEngine = function onenoteEngine(env) {
             console.log("Converted ",converted);
             return { "id" : target.attributes['id'], "data" : converted };
         }
+    };
+
+    var extract_tags_from_contents = function(tag,contents) {
+        var values = [];
+        contents.forEach(function(content) {
+            var tag_datas = tag_search( content[0], tag );
+            var result_block = { 'page_id': content.id };
+            result_block[tag] = tag_datas;
+            values.push(result_block);
+        });
+        return values;
     };
 
     var extract_contents = function(element_paths,contents) {
@@ -938,6 +1006,10 @@ if ("Worker" in window && window.location.hash === '') {
 
         OneNoteSync.prototype.listNotebooks = function() {
             return worker_method('list_notebooks');
+        };
+
+        OneNoteSync.prototype.listTablesForPage = function(notebook_name,section_name,page_name) {
+            return worker_method('list_tables_for_page',[notebook_name,section_name,page_name]);
         };
 
         OneNoteSync.prototype.addDocument = function(doc) {
