@@ -846,7 +846,7 @@ if ("Worker" in window && window.location.hash === '') {
             worker = new Promise(function(resolve,reject) {
                 console.log("Defining worker");
                 var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
-                common_worker.postMessage();
+                common_worker.postMessage(null);
                 common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()+"\nself.tXml = tXml;"], {'type' : 'text/javascript'})) });
                 common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([self.constructor.Engine()], {'type' : 'text/javascript'})) });
                 if ( window.WL ) {
