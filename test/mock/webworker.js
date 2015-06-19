@@ -40,7 +40,7 @@ MockWorker = function(script) {
 };
 
 MockWorker.XMLHttpRequest = XMLHttpRequest;
-MockWorker.indexedDB = indexedDB;
+MockWorker.indexedDB = this.indexedDB;
 
 
 MockWorker.prototype.addEventListener = function(type,callback) {

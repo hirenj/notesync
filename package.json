@@ -9,6 +9,7 @@
   "dependencies": {},
   "devDependencies": {
     "karma": "^0.12.36",
+    "karma-browserify": "^4.2.1",
     "karma-chrome-launcher": "^0.1.12",
     "karma-qunit": "^0.1.4",
     "qunit": "^0.7.6",

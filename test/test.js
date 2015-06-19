@@ -1,13 +1,26 @@
+if (!Function.prototype.bind) {
+  Function.prototype.bind = function(oThis) {
+    if (typeof this !== 'function') {
+      // closest thing possible to the ECMAScript 5
+      // internal IsCallable function
+      throw new TypeError('Function.prototype.bind - what is trying to be bound is not callable');
+    }
 
+    var aArgs   = Array.prototype.slice.call(arguments, 1),
+        fToBind = this,
+        fNOP    = function() {},
+        fBound  = function() {
+          return fToBind.apply(this instanceof fNOP
+                 ? this
+                 : oThis,
+                 aArgs.concat(Array.prototype.slice.call(arguments)));
+        };
 
-// Tests to write
+    fNOP.prototype = this.prototype;
+    fBound.prototype = new fNOP();
 
-// Combinations of results from synchronisation. Need to mock the API requests here?
-// Need to test the syncTime parts - make the server respond like there's no new values etc
+    return fBound;
+  };
+}
 
-
-// Mock     engine.downloadRemoteContent = function(element_paths,last_sync) {
-    // Should return Promise of json blocks to with stringified values to insert into sync engine
-
-// Mock     engine.sendData = function(data) {
-    // Should return promise that will fire whenever data is eventually sent.
+window.Promise = require('promise-polyfill');
