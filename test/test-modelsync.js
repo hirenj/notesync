@@ -1,3 +1,5 @@
+sinon.config.useFakeTimers = false;
+window.Promise = require('promise-polyfill');
 
 QUnit.module("Sync data model with stored data",{
     beforeEach: function() {
@@ -5,12 +7,10 @@ QUnit.module("Sync data model with stored data",{
         window.Worker = MockWorker;
         window.Worker.indexedDB = mockIndexedDB;
         resetIndexedDBMock();
-        sinon.config.useFakeTimers = false;
     },
     afterEach: function() {
         window.Worker.indexedDB = window.indexedDB;
         window.Worker = window.originalWorker;
-        sinon.config.useFakeTimers = true;
         resetIndexedDBMock();
     }
 });

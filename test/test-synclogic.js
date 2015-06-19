@@ -1,3 +1,6 @@
+sinon.config.useFakeTimers = false;
+window.Promise = require('promise-polyfill');
+
 /*
 Accept remote:
 (REMOTE RESOLUTION LOOP)
@@ -51,7 +54,6 @@ QUnit.module("Testing syncing logic", {
         window.Worker.indexedDB = mockIndexedDB;
         resetIndexedDBMock();
         mockSyncEngine.mockEngine(window.OneNoteSync);
-        sinon.config.useFakeTimers = false;
     },
     afterEach: function() {
         window.Worker = window.originalWorker;
@@ -59,7 +61,6 @@ QUnit.module("Testing syncing logic", {
         mockSyncEngine.unmockEngine(window.OneNoteSync);
         mockSyncEngine.reset();
         resetIndexedDBMock();
-        sinon.config.useFakeTimers = true;
     }
 });
 

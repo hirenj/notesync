@@ -1,3 +1,6 @@
+sinon.config.useFakeTimers = false;
+window.Promise = require('promise-polyfill');
+
 QUnit.module("Testing web worker startup and shutdown", {
     beforeEach: function() {
         window.originalWorker = window.Worker;

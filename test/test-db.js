@@ -1,3 +1,5 @@
+sinon.config.useFakeTimers = false;
+window.Promise = require('promise-polyfill');
 
 QUnit.module("Database checks",{ 
     beforeEach: function() {

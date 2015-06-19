@@ -1,16 +1,16 @@
+sinon.config.useFakeTimers = false;
+window.Promise = require('promise-polyfill');
 
 QUnit.module("Testing obtaining locks", {
     beforeEach: function() {
         window.originalWorker = window.Worker;
         window.Worker = MockWorker;
         mockSyncEngine.mockEngine(window.OneNoteSync);
-        sinon.config.useFakeTimers = false;
     },
     afterEach: function() {
         window.Worker = window.originalWorker;
         mockSyncEngine.unmockEngine(window.OneNoteSync);
         mockSyncEngine.reset();
-        sinon.config.useFakeTimers = true;
     }
 });
 

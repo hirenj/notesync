@@ -24,3 +24,19 @@ if (!Function.prototype.bind) {
 }
 
 window.Promise = require('promise-polyfill');
+sinon.config.useFakeTimers = false;
+
+QUnit.module("Test browser features exist", {
+});
+
+QUnit.test( "Test Promise works" , function( assert ) {
+  var done = assert.async();
+  Promise.resolve(true).then(function() {
+    assert.ok(true, 'Can resolve promises');
+    done();
+  });
+});
+
+QUnit.test("Test blob making works",function(assert) {
+  assert.ok( window.URL.createObjectURL !== null, "Can create object URL");
+});
