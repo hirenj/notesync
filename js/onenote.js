@@ -67,7 +67,7 @@ var worker_function = function(self) {
         var store = db instanceof IDBObjectStore ? db : db.transaction('syncelements', "readwrite").objectStore('syncelements');
         var elements_idx = store.index('by_elements');
         var range = null;
-        if (window.IDBKeyRange) {
+        if (typeof IDBKeyRange !== 'undefined') {
             range = data ? IDBKeyRange.only([data.element_id,data.page_id]) : null;
         }
         return db_cursor(elements_idx,range,callback).then(function() { return store; });
