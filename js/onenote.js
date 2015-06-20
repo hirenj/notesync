@@ -625,8 +625,38 @@ var onenoteEngine = function onenoteEngine(env) {
             return [];
         }).then(get_page_contents).then(function(contents) {
             return extract_tags_from_contents('table',contents);
+        }).then(summarise_extracted_tables);
+    };
+
+    var summarise_extracted_tables = function(pages) {
+        return pages.map(function(page) {
+            return { 'page_id' : page.page_id, 'tables' : summarise_tables(page.table) };
         });
     };
+
+    var summarise_tables = function(tables) {
+        var result = {};
+        tables.forEach(function(table) {
+            var key = table.attributes['data-id'];
+            var table_data = table.children.map(function(row) {
+                return row.children.map(extract_text);
+            });
+            result[key] = table_data;
+        });
+        return result;
+    };
+
+    var extract_text = function(el) {
+        if (el.children) {
+            return extract_text(el.children.map(extract_text).join(''));
+        }
+        if (typeof el === 'string') {
+            return el;
+        }
+        if (typeof el === 'object') {
+            return JSON.stringify(el);
+        }
+    }
 
     var list_pages_for_sections = function(sections,section,page) {
 
