@@ -22,3 +22,9 @@ onenote.notifyChanges(DOC_ID,ELEMENT_ID,function(new_values) {
     console.log(new_values);
 });
 ```
+
+### Shutting down and cleanup
+
+```js
+OneNoteSync.terminate().then(function() { console.log("Cleaned up") });
+```
