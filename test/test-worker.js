@@ -1,5 +1,15 @@
 sinon.config.useFakeTimers = false;
-window.Promise = require('promise-polyfill');
+if ( ! window.Promise ) {
+    window.Promise = require('promise-polyfill');
+}
+
+var test_method = function() {
+    if (window.indexedDB) {
+        return QUnit.test.apply(QUnit,arguments);
+    } else {
+        return QUnit.skip.apply(QUnit,arguments);
+    }
+};
 
 QUnit.module("Testing web worker startup and shutdown", {
     beforeEach: function() {
@@ -11,19 +21,20 @@ QUnit.module("Testing web worker startup and shutdown", {
     }
 });
 
-QUnit.test( "Test init of worker and database using real DB" , function( assert ) {
+test_method( "Test init of worker and database using real DB" , function( assert ) {
     var done = assert.async();
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         assert.ok(onenote !== null, 'Have onenote object');
-        OneNoteSync.terminate();
-        var req = indexedDB.deleteDatabase('onenote');
-        req.onsuccess = function() {
-            done();
-        };
-        req.onerror = function() {
-            done();
-        };
+        OneNoteSync.terminate().then(function() {
+            var req = indexedDB.deleteDatabase('onenote');
+            req.onsuccess = function() {
+                done();
+            };
+            req.onerror = function() {
+                done();
+            };
+        });
     }).catch(function(err) {
         assert.ok(false,err);
         assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");
@@ -38,7 +49,7 @@ QUnit.test( "Test init of worker and database using real DB" , function( assert 
 });
 
 
-QUnit.test( "Test shutdown of worker" , function( assert ) {
+test_method( "Test shutdown of worker" , function( assert ) {
     var done = assert.async();
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {

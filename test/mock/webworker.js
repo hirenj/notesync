@@ -3,9 +3,20 @@ var dataURLToBlob = function(dataURL,callback) {
 	xhr.open('GET',dataURL, true);
 	xhr.responseType = 'arraybuffer';
 	xhr.onload = function(e) {
-	  if (this.status == 200) {
-	    callback(String.fromCharCode.apply(null, new Uint8Array(this.response)));
-	  }
+		if (this.status == 200) {
+			var result = '';
+			var data = new Uint8Array(this.response);
+			try {
+				result = String.fromCharCode.apply(null, data);
+			} catch(e) {
+				var dataArray = [];
+				for (var j = 0, jj = data.length; j < jj; ++j) {
+					dataArray.push(data[j]);
+				}
+				result = String.fromCharCode.apply(null, dataArray);
+			}
+			callback(result);
+		}
 	};
 	xhr.send();
 };
@@ -22,7 +33,7 @@ MockWorker = function(script) {
 		parent.context.listeners.push(callback);
 	};
 	this.context.postMessage = function(message) {
-		parent.listeners.forEach(function(cb) {
+		(parent.listeners || []).forEach(function(cb) {
 			cb.call(parent,{ 'data' : message });
 		});
 	};

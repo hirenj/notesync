@@ -1,5 +1,7 @@
 sinon.config.useFakeTimers = false;
-window.Promise = require('promise-polyfill');
+if ( ! window.Promise ) {
+    window.Promise = require('promise-polyfill');
+}
 
 QUnit.module("Sync data model with stored data",{
     beforeEach: function() {
@@ -17,17 +19,15 @@ QUnit.module("Sync data model with stored data",{
 
 QUnit.test( "Test watching of database", function(assert) {
     var done = assert.async();
-    console.log("Test watching of database");
     var onenote = new OneNoteSync();
-    console.log("Test watching of database");
-    commitIndexedDBMockData('a', { 'page_id' : 'foo', 'element_id' : 'bar', 'source' : 'remote', 'value' : JSON.stringify({'foobar' : 'fooz'}) });
 
     onenote.ready.then(function() {
+        commitIndexedDBMockData('a', { 'page_id' : 'foo', 'element_id' : 'bar', 'source' : 'remote', 'value' : JSON.stringify({'foobar' : 'fooz'}) });
         onenote.notifyChanges('foo','bar',function(val) {
             assert.ok(val.foobar == "fooz","Got a value from the database");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done); 
         });
+        onenote.sync();
     });
 });
 
@@ -41,8 +41,7 @@ QUnit.test( "Test watching of database, changing value", function(assert) {
     onenote.ready.then(function() {
         onenote.notifyChanges('foo','bar',function(val) {
             assert.ok(val.foobar == "fooz2","Got a value from the database");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -66,8 +65,7 @@ QUnit.test( "Test watching of database, changing value sequentially", function(a
             values.push(val.foobar);
             if (change_count == 2) {
                 assert.deepEqual(values, ['fooz','fooz2'],"Got a value from the database");
-                OneNoteSync.terminate();
-                done();
+                OneNoteSync.terminate().then(done);
             }
         });
     });
@@ -82,8 +80,7 @@ QUnit.test( "Test watching of database with watched documents in db already", fu
         setTimeout(function() {
             onenote.getValues('foo','bar').then(function(val) {
                 assert.ok(val.foobar == "foo-existing","Got a value from the database");
-                OneNoteSync.terminate();
-                done();
+                OneNoteSync.terminate().then(done);
             });
         },3000);
     });

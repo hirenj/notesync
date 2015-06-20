@@ -1,5 +1,7 @@
 sinon.config.useFakeTimers = false;
-window.Promise = require('promise-polyfill');
+if ( ! window.Promise ) {
+    window.Promise = require('promise-polyfill');
+}
 
 QUnit.module("Testing obtaining locks", {
     beforeEach: function() {
@@ -14,7 +16,16 @@ QUnit.module("Testing obtaining locks", {
     }
 });
 
-QUnit.test( "Test simple sync" , function( assert ) {
+var test_method = function() {
+    if (window.indexedDB) {
+        return QUnit.test.apply(QUnit,arguments);
+    } else {
+        return QUnit.skip.apply(QUnit,arguments);
+    }
+};
+
+
+test_method( "Test simple sync" , function( assert ) {
     var done = assert.async();
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
@@ -22,19 +33,20 @@ QUnit.test( "Test simple sync" , function( assert ) {
         onenote.watchElement('foo','bar').then(onenote.sync.bind(onenote)).then(function() {
             assert.ok(spy.called, 'MockSyncEngine properly installed');
             spy.restore();
-            OneNoteSync.terminate();
-            var req = indexedDB.deleteDatabase('onenote');
-            req.onsuccess = function() {
-                done();
-            };
-            req.onerror = function() {
-                done();
-            };
+            OneNoteSync.terminate().then(function() {
+                var req = window.indexedDB.deleteDatabase('onenote');
+                req.onsuccess = function() {
+                    done();
+                };
+                req.onerror = function() {
+                    done();
+                };
+            });
         }).catch(console.error.bind(console));
     });
 });
 
-QUnit.test( "Test two parallel syncs" , function( assert ) {
+test_method( "Test two parallel syncs" , function( assert ) {
     var done = assert.async();
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {

@@ -1,5 +1,7 @@
 sinon.config.useFakeTimers = false;
-window.Promise = require('promise-polyfill');
+if ( ! window.Promise ) {
+    window.Promise = require('promise-polyfill');
+}
 
 /*
 Accept remote:
@@ -88,8 +90,7 @@ QUnit.test( "Test accepting a remote value on empty db" , function( assert ) {
             return onenote.sync();
         }).then(function() {
             assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length == 1,"Stored remote data");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
             done();
@@ -120,8 +121,7 @@ QUnit.test( "Test accepting a newer remote value than existing" , function( asse
         }).then(function() {
             assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length == 1,"Stored remote data");
             assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.value == '{}'; }).length == 1,"Stored remote data");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
             done();
@@ -152,12 +152,10 @@ QUnit.test( "Test accepting an older remote value than existing" , function( ass
         }).then(function() {
             assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length == 1,"Stored remote data");
             assert.ok(mockIndexedDBItems.filter(function(item) { return item.value.value == '{"foo":"bar"}'; }).length == 1,"Stored remote data");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -186,12 +184,10 @@ QUnit.test( "Test remote overwriting local with same value" , function( assert )
         }).then(function() {
             assert.equal(mockIndexedDBItems.filter(function(item) { return item.value.source; }).length , 1,"Stored remote data");
             assert.equal(mockIndexedDBItems.filter(function(item) { return item.value.value == '{"new":true}' && item.value.source == 'remote'; }).length, 1,"Stored remote data");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -228,12 +224,10 @@ QUnit.test( "Test updating parent on a local value with new remote" , function( 
             assert.equal(states[0].source,"local");
             assert.equal(states[1].source,"remote");
             assert.equal(states[1].value,'{"baz":true}');
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -264,12 +258,10 @@ QUnit.test( "Test updating parent on a local value with remote matching existing
             assert.equal(states.length, 1,"Correct number of states in db");
             assert.equal(states[0].value,"{}");
             assert.equal(states[0].source,"remote");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -304,12 +296,10 @@ QUnit.test( "Test updating parent on a local value with a remote that has only d
             assert.equal(states[0].source,"local");
             assert.equal(states[1].source,"remote");
             assert.equal(states[1].value,'{"foo":"bar"}');
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -340,12 +330,10 @@ QUnit.test( "Test adding remote value when there is a local value without a vali
             assert.equal(states.length, 1,"Correct number of states in db");
             assert.equal(states[0].source,"remote");
             assert.equal(states[0].value,'{}');
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -387,12 +375,10 @@ QUnit.test( "Test updating parent on a local value with a remote that has only d
             assert.equal(states[2].source,"remote");
             assert.equal(states[2].value,'{"new":"data"}');
 
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -422,12 +408,10 @@ QUnit.test( "Test adding a local value with the same value as remote" , function
             assert.equal(states.length, 1,"Correct number of states in db");
             assert.equal(states[0].value,'{"foo":"bar"}');
             assert.equal(states[0].source,"remote");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
@@ -459,12 +443,10 @@ QUnit.test( "Test adding a local value in an empty db" , function( assert ) {
             assert.equal(states[0].source,"local");
             assert.equal(states[1].value,'{"foo":"bar"}');
             assert.equal(states[1].source,"remote");
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         }).catch(function(err) {
             console.log("Failed sync ",err);
-            OneNoteSync.terminate();
-            done();
+            OneNoteSync.terminate().then(done);
         });
     });
 });
