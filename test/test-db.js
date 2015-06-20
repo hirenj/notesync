@@ -1,3 +1,7 @@
+sinon.config.useFakeTimers = false;
+if ( ! window.Promise ) {
+    window.Promise = require('promise-polyfill');
+}
 
 QUnit.module("Database checks",{ 
     beforeEach: function() {
@@ -25,8 +29,7 @@ QUnit.test( "Test init of worker and database using mock",function( assert ) {
         assert.ok(onenote !== null, 'Have onenote object');
         assert.ok(JSON.stringify(spy.args) === '[["synclocks"],["syncelements"]]' ,"Created two object stores");
         spy.restore();
-        OneNoteSync.terminate();
-        done();
+        OneNoteSync.terminate().then(done);
     }).catch(function(err) {
         assert.ok(false,err);
         assert.ok(false,"Error establishing web worker (mocked) or database (mocked)");

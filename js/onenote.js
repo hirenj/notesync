@@ -66,7 +66,10 @@ var worker_function = function(self) {
     var loop_cursor = function(db,data,callback) {
         var store = db instanceof IDBObjectStore ? db : db.transaction('syncelements', "readwrite").objectStore('syncelements');
         var elements_idx = store.index('by_elements');
-        var range = data ? IDBKeyRange.only([data.element_id,data.page_id]) : null;
+        var range = null;
+        if (window.IDBKeyRange) {
+            range = data ? IDBKeyRange.only([data.element_id,data.page_id]) : null;
+        }
         return db_cursor(elements_idx,range,callback).then(function() { return store; });
     };
 
@@ -152,6 +155,9 @@ var worker_function = function(self) {
     var extracted = {};
 
     var database_watcher = function() {
+        if (self.locked) {
+            return;
+        }
         var ids_to_watch = [];
         Object.keys(extracted).forEach(function(page_id) {
             ids_to_watch = ids_to_watch.concat(Object.keys(extracted[page_id]).map(function(el_id) {  return [page_id,el_id]; }));
@@ -198,11 +204,14 @@ var worker_function = function(self) {
             if (! self.syncEngine ) {
                 return Promise.resolve(true);
             }
+            self.locked = true;
             return synchronise_documents().catch(function(error) {
                 // FIXME - do something with the error here
                 return Promise.resolve(true);
             });
-        }).then(release_lock);
+        }).then(release_lock).then(function() {
+            self.locked = false;
+        });
     };
 
     var synchronise_documents = function() {
@@ -615,7 +624,6 @@ var onenoteEngine = function onenoteEngine(env) {
             }
             return [];
         }).then(get_page_contents).then(function(contents) {
-            console.log(contents);
             return extract_tags_from_contents('table',contents);
         });
     };
@@ -913,10 +921,10 @@ if ("Worker" in window && window.location.hash === '') {
             var self = this;
             worker = new Promise(function(resolve,reject) {
                 console.log("Defining worker");
-                var common_worker = new Worker(window.URL.createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
+                var common_worker = new Worker((window.webkitURL || window.URL).createObjectURL(new Blob(['('+worker_function.toString()+'(self))'], {'type' : 'text/javascript'})));
                 common_worker.postMessage(null);
-                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([tXml.toString()+"\nself.tXml = tXml;"], {'type' : 'text/javascript'})) });
-                common_worker.postMessage({ 'import_script' : window.URL.createObjectURL(new Blob([self.constructor.Engine()], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : (window.webkitURL || window.URL).createObjectURL(new Blob([tXml.toString()+"\nself.tXml = tXml;"], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : (window.webkitURL || window.URL).createObjectURL(new Blob([self.constructor.Engine()], {'type' : 'text/javascript'})) });
                 if ( window.WL ) {
 
                     WL.init({
@@ -933,7 +941,7 @@ if ("Worker" in window && window.location.hash === '') {
                 common_worker.addEventListener('message',function(e) {
                     if (e.data) {
                         if (e.data.event && e.data.event == 'terminate') {
-                            var event = new Event('terminate');
+                            var event = new CustomEvent('terminate',{'bubbles':false,'cancelable':true});
                             common_worker.dispatchEvent(event);
                             return;
                         }
