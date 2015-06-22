@@ -15,6 +15,26 @@ onenote.watchElement(DOC_ID,ELEMENT_ID);
 onenote.sync();
 var values = onenote.getValues(DOC_ID,ELEMENT_ID);
 ```
+
+### Browsing tables on a page, and watching one table
+
+```js
+onenote.listTablesForPage('Notebook name','Section name','Page title').then(function(pages_with_tables) {
+	pages_with_tables.forEach(function(tables) {
+		tables.forEach(function(table) {
+
+			// We have the data from the table
+			console.table(table.table.data);
+
+			// If we want to add this to our synchronisation
+			// call the watch method on the table
+			table.watch();
+		});
+	});
+});
+```
+
+
 ### Watching for changes on values
 
 ```js

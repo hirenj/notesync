@@ -115,8 +115,14 @@ var worker_function = function(self) {
         },
         'create_table' : function(document_id,table) {
             var element_id = 'table-'+(new Date()).getTime();
-            methods['watch_element'](document_id,element_id);
-            methods['set_values'](document_id,element_id,table).then(synchronise_documents);
+            return wait_for_lock().then(function() {
+                self.locked = true;
+                methods['watch_element'](document_id,element_id);
+                methods['set_values'](document_id,element_id,table).then(synchronise_documents);
+            }).then(release_lock).then(function() {
+                self.locked = false;
+            });
+
             return element_id;
         },
         'get_values' : function(document_id,element_id) {
@@ -144,8 +150,8 @@ var worker_function = function(self) {
             // oauth tokens when the current one expires
             return "All ok";
         },
-        'sync' : function() {
-            return lock_and_synchronise();
+        'sync' : function(wait) {
+            return lock_and_synchronise(wait);
         }
     };
 
@@ -153,6 +159,39 @@ var worker_function = function(self) {
     var element_paths = {}; //{ 'document_id' : [ '#element_identifier' ] };
 
     var extracted = {};
+
+
+    var generate_id_element = function(element,new_id) {
+        var element_id = element.data_id || new_id;
+        var document_id = element.page_id;
+        if (element.data_id) {
+            methods['watch_element'](document_id,element_id);
+            return methods['sync'](true).then(Promise.resolve({ 'element_id' : element_id, 'page_id' : document_id }));
+        }
+        var parent_date = new Date();
+        var parent_definition = { 'page_id' : document_id,
+          'element_id' : element_id,
+          'remote_id' : element.remote_id,
+          'modified' : parent_date,
+          'source' : 'remote',
+          'value' : '{}'
+        };
+        return wait_for_lock().then(function() {
+            self.locked = true;
+            return resolve_latest_data(parent_definition).then(function() {
+                methods['watch_element'](document_id,element_id);
+                extracted[document_id][element_id] = {};
+                return methods['set_values'](document_id,element_id,element.data).then(synchronise_documents);
+            }).then(function() {
+                return { 'element_id' : element_id, 'page_id' : document_id };
+            });
+        }).catch(function(err) {
+            console.error(err);
+        }).then(release_lock).then(function() {
+            self.locked = false;
+        });
+    };
+
 
     var database_watcher = function() {
         if (self.locked) {
@@ -199,8 +238,12 @@ var worker_function = function(self) {
 
     self.syncEngine = null;
 
-    var lock_and_synchronise = function() {
-        return obtain_lock().then(function() {
+    var lock_and_synchronise = function(wait) {
+        var lock_fn = obtain_lock;
+        if (wait) {
+            lock_fn = wait_for_lock;
+        }
+        return lock_fn().then(function() {
             if (! self.syncEngine ) {
                 return Promise.resolve(true);
             }
@@ -228,6 +271,9 @@ var worker_function = function(self) {
             });
         }).then(function(contents) {
             return Promise.all(contents.map(function(content) {
+                if (! content ) {
+                    return Promise.resolve(true);
+                }
                 return resolve_latest_data(content).catch(function(err) {
                     console.log("Could not resolve data for ",content.id,err);
                     return null;
@@ -451,6 +497,23 @@ var worker_function = function(self) {
         });
     };
 
+    var timeout_promise = function(timeout) {
+        return new Promise(function(resolve,reject) {
+            setTimeout(function() {
+                resolve();
+            },timeout);
+        });
+    };
+
+    var wait_for_lock = function() {
+        var lock = obtain_lock();
+        return lock.catch(function(err) {
+            if (err.message == 'Sync in progress') {
+                return timeout_promise(1000).then(wait_for_lock);
+            }
+        });
+    }
+
     var release_lock = function() {
         return local_db.then(function(db) {
             var store = db.transaction(["synclocks"], "readwrite").objectStore('synclocks');
@@ -515,6 +578,7 @@ var worker_function = function(self) {
 
     self.do_api_call = do_api_call;
     self.methods = methods;
+    self.generate_id_element = generate_id_element;
 
     read_synced_ids().then(function(existing_data) {
         if (existing_data) {
@@ -574,6 +638,12 @@ var onenoteEngine = function onenoteEngine(env) {
             }
             return list_tables_for_page(notebook,section,page);
         };
+        env.methods['upgrade_table'] = function(table_data) {
+            if ( ! env.token ) {
+                throw new Error("No AUTH token");
+            }
+            return env.generate_id_element(table_data, ("table-"+(new Date()).getTime()));
+        };
     };
 
     var get_updated_pages = function(element_paths,last_sync) {
@@ -630,33 +700,17 @@ var onenoteEngine = function onenoteEngine(env) {
 
     var summarise_extracted_tables = function(pages) {
         return pages.map(function(page) {
-            return { 'page_id' : page.page_id, 'tables' : summarise_tables(page.table) };
+            return summarise_tables(page.table,page.page_id);
         });
     };
 
-    var summarise_tables = function(tables) {
-        var result = {};
-        tables.forEach(function(table) {
-            var key = table.attributes['data-id'];
-            var table_data = table.children.map(function(row) {
-                return row.children.map(extract_text);
-            });
-            result[key] = table_data;
+    var summarise_tables = function(tables,page_id) {
+        return tables.map(function(table) {
+            var converted = convert_table(table);
+            var key = table.attributes['data-id'] || table.attributes['id'];
+            return { 'page_id' : page_id, 'remote_id' : table.attributes['id'], 'data_id' : table.attributes['data-id'], 'data' : converted };
         });
-        return result;
     };
-
-    var extract_text = function(el) {
-        if (el.children) {
-            return extract_text(el.children.map(extract_text).join(''));
-        }
-        if (typeof el === 'string') {
-            return el;
-        }
-        if (typeof el === 'object') {
-            return JSON.stringify(el);
-        }
-    }
 
     var list_pages_for_sections = function(sections,section,page) {
 
@@ -737,7 +791,10 @@ var onenoteEngine = function onenoteEngine(env) {
     };
 
     var convert_header = function(header_row) {
-        return header_row.children.map(function(td) { return td.children[0].children[0]; });
+        return header_row.children.map(function(td) {
+            var content = td.children[0];
+            return content.children ? content.children[0] : content;
+        });
     };
 
     var extract_tag = function(span,data,field) {
@@ -812,6 +869,9 @@ var onenoteEngine = function onenoteEngine(env) {
         contents.forEach(function(content) {
             values = values.concat(element_paths[content.id].map(function(element_id) {
                 var extracted = extract_content( content[0], element_id );
+                if (! extracted) {
+                    return null;
+                }
                 var value = JSON.stringify(extracted.data);
                 return { 'page_id': content.id, 'element_id': element_id, 'modified' : content.modified, 'source' : 'remote', 'remote_id' : extracted.id,  'value' : value };
             }));
@@ -1047,7 +1107,18 @@ if ("Worker" in window && window.location.hash === '') {
         };
 
         OneNoteSync.prototype.listTablesForPage = function(notebook_name,section_name,page_name) {
-            return worker_method('list_tables_for_page',[notebook_name,section_name,page_name]);
+            return worker_method('list_tables_for_page',[notebook_name,section_name,page_name]).then(function(pages) {
+                return pages.map(function(tables) {
+                    return tables.map(function(table) {
+                        var return_obj = { 'table' : table, 'watch' :
+                        function() {
+                            return worker_method('upgrade_table',[this.table]);
+                        }
+                        };
+                        return return_obj;
+                    });
+                });
+            });
         };
 
         OneNoteSync.prototype.addDocument = function(doc) {
