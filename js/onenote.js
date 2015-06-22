@@ -182,13 +182,13 @@ var worker_function = function(self) {
                 methods['watch_element'](document_id,element_id);
                 extracted[document_id][element_id] = {};
                 return methods['set_values'](document_id,element_id,element.data).then(synchronise_documents);
-            }).then(function() {
-                return { 'element_id' : element_id, 'page_id' : document_id };
             });
         }).catch(function(err) {
             console.error(err);
         }).then(release_lock).then(function() {
             self.locked = false;
+        }).then(function() {
+            return { 'element_id' : element_id, 'page_id' : document_id };
         });
     };
 

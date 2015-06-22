@@ -28,7 +28,11 @@ onenote.listTablesForPage('Notebook name','Section name','Page title').then(func
 
 			// If we want to add this to our synchronisation
 			// call the watch method on the table
-			table.watch();
+			var ids = table.watch();
+
+			// We can now be notified on changes for this
+			// table
+			onenote.notifyChanges(ids.page_id,ids.element_id,watch_fn);
 		});
 	});
 });
