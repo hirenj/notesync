@@ -13,6 +13,7 @@
     "karma-chrome-launcher": "^0.1.12",
     "karma-phantomjs-launcher": "^0.2.0",
     "karma-qunit": "^0.1.4",
+    "karma-sauce-launcher": "^0.2.11",
     "phantomjs": "^1.9.17",
     "promise-polyfill": "^2.0.2",
     "qunit": "^0.7.6",

@@ -30,7 +30,7 @@ test_method( "Test simple sync" , function( assert ) {
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         var spy = sinon.spy(mockSyncEngine, "downloadRemoteContent");
-        onenote.watchElement('foo','bar').then(onenote.sync.bind(onenote)).then(function() {
+        onenote.watchElement('foo','bar').then(onenote.sync.bind(onenote,true)).then(function() {
             assert.ok(spy.called, 'MockSyncEngine properly installed');
             spy.restore();
             OneNoteSync.terminate().then(function() {
@@ -51,38 +51,42 @@ test_method( "Test two parallel syncs" , function( assert ) {
     var onenote = new OneNoteSync();
     onenote.ready.then(function() {
         var spy = sinon.spy(mockSyncEngine, "downloadRemoteContent");
-        mockSyncEngine_downloadRemoteContentWaitTime = 3000;
+        mockSyncEngine_downloadRemoteContentWaitTime = 1000;
         onenote.watchElement('foo','bar').then(function() {
             var first_lock = onenote.sync();
             var second_lock = new Promise(function(resolve) {
                 setTimeout(function() {
+
                     resolve(onenote.sync());
-                },1000);
+                },100);
             });
             return first_lock.then(function() {
                 return second_lock;
             });
         }).then(function() {
             // assert.not ok?
-            OneNoteSync.terminate();
-            var req = indexedDB.deleteDatabase('onenote');
-            req.onsuccess = function() {
-                done();
-            };
-            req.onerror = function() {
-                done();
-            };
+            assert.ok(false,"Second sync should be rejected");
+            return OneNoteSync.terminate().then(function() {
+                var req = indexedDB.deleteDatabase('onenote');
+                req.onsuccess = function() {
+                    done();
+                };
+                req.onerror = function() {
+                    done();
+                };
+            });
         }).catch(function(err) {
             assert.ok(err == 'Sync in progress','Rejecting second sync call');
             assert.ok(spy.calledOnce, 'downloadRemoteContent only called once');
-            OneNoteSync.terminate();
-            var req = indexedDB.deleteDatabase('onenote');
-            req.onsuccess = function() {
-                done();
-            };
-            req.onerror = function() {
-                done();
-            };
+            return OneNoteSync.terminate().then(function() {
+                var req = indexedDB.deleteDatabase('onenote');
+                req.onsuccess = function() {
+                    done();
+                };
+                req.onerror = function() {
+                    done();
+                };
+            });
         }).then(function() {
             spy.restore();
         });

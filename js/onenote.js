@@ -5,7 +5,7 @@ var worker_function = function(self) {
         var request = self.indexedDB.open("onenote",3);
         var db = null;
         request.onerror = function(event){
-            reject();
+            reject(new Error(event.message));
         };
         request.onupgradeneeded = function(event) {
             db = event.target.result;
@@ -57,8 +57,8 @@ var worker_function = function(self) {
                     resolve();
                 }
             };
-            key_cursor.onerror = function() {
-                reject();
+            key_cursor.onerror = function(ev) {
+                reject(new Error(ev.message));
             };
         });
     };
@@ -68,7 +68,11 @@ var worker_function = function(self) {
         var elements_idx = store.index('by_elements');
         var range = null;
         if (typeof IDBKeyRange !== 'undefined') {
-            range = data ? IDBKeyRange.only([data.element_id,data.page_id]) : null;
+            try {
+                range = data ? IDBKeyRange.only([data.element_id,data.page_id]) : null;
+            } catch (e) {
+                range = null;
+            }
         }
         return db_cursor(elements_idx,range,callback).then(function() { return store; });
     };
@@ -463,7 +467,7 @@ var worker_function = function(self) {
                 resolve(req.result);
             };
             req.onerror = function(event) {
-                reject();
+                reject(new Error(event.message));
             };
         });
     };
@@ -475,7 +479,7 @@ var worker_function = function(self) {
                 resolve(req.result);
             };
             req.onerror = function(event) {
-                reject();
+                reject(new Error(event.message));
             };
         });
     };
@@ -490,7 +494,7 @@ var worker_function = function(self) {
                     console.log("Already syncing - not doing anything");
                     return Promise.reject(new Error("Sync in progress"));
                 }
-                return store_put( store ,'lock',{'time' : new Date(), 'lock' : 'lock' }).then(function(locked) {
+                return store_put( db.transaction(["synclocks"], "readwrite").objectStore('synclocks') ,'lock',{'time' : new Date(), 'lock' : 'lock' }).then(function(locked) {
                     console.log("Obtained LOCK for sync");
                 });
             });
@@ -520,7 +524,7 @@ var worker_function = function(self) {
             return store_get( store, "lock").then(function(lock) {
                 if (lock) {
                     console.log("Releasing LOCK for sync");
-                    return store_put( store ,'lock');
+                    return store_put( db.transaction(["synclocks"], "readwrite").objectStore('synclocks') ,'lock');
                 }
             });
         });
@@ -1015,6 +1019,7 @@ if ("Worker" in window && window.location.hash === '') {
                 common_worker.postMessage(null);
                 common_worker.postMessage({ 'import_script' : (window.webkitURL || window.URL).createObjectURL(new Blob([tXml.toString()+"\nself.tXml = tXml;"], {'type' : 'text/javascript'})) });
                 common_worker.postMessage({ 'import_script' : (window.webkitURL || window.URL).createObjectURL(new Blob([self.constructor.Engine()], {'type' : 'text/javascript'})) });
+                common_worker.postMessage({ 'import_script' : (window.webkitURL || window.URL).createObjectURL(new Blob(["self.postMessage({'event' : 'scripts_imported' });"], {'type' : 'text/javascript'})) });
                 if ( window.WL ) {
 
                     WL.init({
@@ -1030,6 +1035,10 @@ if ("Worker" in window && window.location.hash === '') {
                 }
                 common_worker.addEventListener('message',function(e) {
                     if (e.data) {
+                        if (e.data.event && e.data.event == 'scripts_imported') {
+                            resolve(common_worker);
+                            return;
+                        }
                         if (e.data.event && e.data.event == 'terminate') {
                             var event = new CustomEvent('terminate',{'bubbles':false,'cancelable':true});
                             common_worker.dispatchEvent(event);
@@ -1037,7 +1046,6 @@ if ("Worker" in window && window.location.hash === '') {
                         }
                     }
                 });
-                resolve(common_worker);
             });
             return worker;
         };

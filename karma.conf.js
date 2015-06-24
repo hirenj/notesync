@@ -2,6 +2,18 @@
 // Generated on Mon Apr 20 2015 22:29:04 GMT+0200 (CEST)
 
 module.exports = function(config) {
+
+  if (!process.env.SAUCE_USERNAME) {
+    if (!require('fs').existsSync('sauce.json')) {
+      console.log('Create a sauce.json with your credentials based on the sauce-sample.json file.');
+      process.exit(1);
+    } else {
+      process.env.SAUCE_USERNAME = require('./sauce').username;
+      process.env.SAUCE_ACCESS_KEY = require('./sauce').accessKey;
+    }
+  }
+
+
   config.set({
 
     // base path that will be used to resolve all patterns (eg. files, exclude)
@@ -37,7 +49,7 @@ module.exports = function(config) {
     // test results reporter to use
     // possible values: 'dots', 'progress'
     // available reporters: https://npmjs.org/browse/keyword/karma-reporter
-    reporters: ['progress'],
+    reporters: ['progress','saucelabs'],
 
 
     // web server port
@@ -72,7 +84,30 @@ module.exports = function(config) {
         },
         flags: ['--load-images=true'],
         debug: true
-      }
+      },
+   sl_chrome: {
+      base: 'SauceLabs',
+      browserName: 'chrome',
+      platform: 'Windows 7',
+      version: '35'
+    },
+    sl_firefox: {
+      base: 'SauceLabs',
+      browserName: 'firefox',
+      version: '30'
+    },
+    sl_ios_safari: {
+      base: 'SauceLabs',
+      browserName: 'iphone',
+      platform: 'OS X 10.9',
+      version: '7.1'
+    },
+    sl_ie_11: {
+      base: 'SauceLabs',
+      browserName: 'internet explorer',
+      platform: 'Windows 8.1',
+      version: '11'
+    }
     },
 
     // Continuous Integration mode
