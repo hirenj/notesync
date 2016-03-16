@@ -30,6 +30,7 @@ function doLogin_WL() {
         console.log(err);
     });
 };
+// https://apps.dev.microsoft.com/
 function doLogin_AD() {
 	var adal = new AuthenticationContext({'clientId' : 'some-id', 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
 	adal.login();
