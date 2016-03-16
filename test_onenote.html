@@ -36,9 +36,11 @@ function doLogin_WL() {
 // https://msdn.microsoft.com/en-us/office/office365/howto/onenote-auth
 function doLogin_AD() {
     // We actually want to log in here
-    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?scope=openid&response_mode=fragment&nonce=12345&response_type=id_token&state=12345&client_id="+client_id+"&redirect_url=https://http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html"
-	var adal = new AuthenticationContext({'clientId' : client_id, 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
-	adal.login();
+    var client_id = '';
+    var target_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?scope=openid&response_mode=fragment&nonce=12345&response_type=id_token+token&state=12345&client_id="+client_id+"&redirect_url=https://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html";
+	// var adal = new AuthenticationContext({'clientId' : client_id, 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
+	// adal.login();
+    window.location.replace(target_url);
 };
 </script>
 </body>
