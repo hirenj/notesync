@@ -31,8 +31,12 @@ function doLogin_WL() {
     });
 };
 // https://apps.dev.microsoft.com/
+// https://azure.microsoft.com/en-us/documentation/articles/active-directory-v2-protocols-implicit/
+// https://azure.microsoft.com/en-us/documentation/articles/active-directory-v2-scopes/
 function doLogin_AD() {
-	var adal = new AuthenticationContext({'clientId' : 'some-id', 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
+    // We actually want to log in here
+    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?scope=openid&response_mode=fragment&nonce=12345&response_type=id_token&state=12345&client_id="+client_id+"&redirect_url=https://http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html"
+	var adal = new AuthenticationContext({'clientId' : client_id, 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
 	adal.login();
 };
 </script>
