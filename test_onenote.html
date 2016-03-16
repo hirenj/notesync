@@ -1,5 +1,6 @@
 <html>
 <head>
+<script src="https://secure.aadcdn.microsoftonline-p.com/lib/1.0.8/js/adal.min.js"></script>
 <script src="//js.live.net/v5.0/wl.debug.js"></script>
 <script src="js/tXml.js"></script>
 <script src="js/onenote.js"></script>
@@ -16,7 +17,11 @@
 function setOneNote() {
 	window.onenoter = new OneNoteSync();
 };
+
 function doLogin() {
+	return doLogin_AD();
+}
+function doLogin_WL() {
     WL.login().then(function(response) {
         onenoter.setToken(response.session.access_token).then(function(ok) {
             console.log(ok);
@@ -24,6 +29,10 @@ function doLogin() {
     },function(err) {
         console.log(err);
     });
+};
+function doLogin_AD() {
+	var adal = new AuthenticationContext({'clientId' : 'some-id', 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
+	adal.login();
 };
 </script>
 </body>
