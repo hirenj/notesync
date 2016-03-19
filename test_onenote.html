@@ -36,7 +36,13 @@ function doLogin_WL() {
 // https://msdn.microsoft.com/en-us/office/office365/howto/onenote-auth
 function doLogin_AD() {
     // We actually want to log in here
-    var client_id = '';
+    var client_id = '233f8abb-2aaf-479b-bdaf-deb9675ad11b';
+    // Log-in flow should be that you do the log-in first, and get a user id for 
+    // the current user as well as the account type.
+
+    // When OneNote is activated, you do the appropriate login according to 
+    // the AD path or the WL path.
+
     // The following url works for accounts using Azure AD
     var target_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?scope=openid%20Notes.ReadWrite&response_mode=fragment&nonce=12345&response_type=token&state=12345&client_id="+client_id+"&redirect_url=https://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html";
 
