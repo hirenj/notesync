@@ -34,6 +34,7 @@ function doLogin_WL() {
 // https://azure.microsoft.com/en-us/documentation/articles/active-directory-v2-protocols-implicit/
 // https://azure.microsoft.com/en-us/documentation/articles/active-directory-v2-scopes/
 // https://msdn.microsoft.com/en-us/office/office365/howto/onenote-auth
+// http://graph.microsoft.io/en-us/docs/api-reference/beta/resources/notes
 function doLogin_AD() {
     // We actually want to log in here
     var client_id = '233f8abb-2aaf-479b-bdaf-deb9675ad11b';
@@ -44,7 +45,7 @@ function doLogin_AD() {
     // the AD path or the WL path.
 
     // The following url works for accounts using Azure AD
-    var target_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?scope=openid%20Notes.ReadWrite&response_mode=fragment&nonce=12345&response_type=token&state=12345&client_id="+client_id+"&redirect_url=https://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html";
+    var target_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?scope=openid%20email%20profile%20Notes.ReadWrite.All&response_mode=fragment&nonce=12345&response_type=id_token+token&state=12345&client_id="+client_id+"&redirect_url=https://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html";
 
 	// var adal = new AuthenticationContext({'clientId' : client_id, 'redirectUrl' : 'http://hirenj-jsonenotetest.localtest.me:8000/test_onenote.html'});
 	// adal.login();
